@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        WME Place Harmonizer Beta
 // @namespace   WazeUSA
-// @version     2026.05.02.00
+// @version     2026.05.02.01
 // @description Harmonizes, formats, and locks a selected place
 // @author      WMEPH Development Group
 // @include      https://www.waze.com/editor*
@@ -44,6 +44,8 @@
     'v 2026.04.31.001 : Fixed Bug where venue spacific PNH defult services would cresh the script!',
     'v 2026.04.31.002 : Fixed Google Search "spy glass" on PUR popup',
     'v 2026.04.31.003 : Take 2 on the Bug where venue spacific PNH defult services would cresh the script! Orginal Code has this as not active!',
+    'v 2026.05.02.000 : Take 3 on the Bug where venue spacific PNH defult services would cresh the script! Orginal Code has this as not active!',
+    'v 2026.05.02.001 : Fixed Map Highlights for places with PURs when Venue layer is not active.',
   ];
 
   // **************************************************************************************************************
@@ -6965,6 +6967,11 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
   function applyHighlightsTest(venues, force) {
     if (!_layer) return;
 
+    // Don't highlight if WME Venues layer is hidden
+    if (!sdk.Map.isLayerVisible({ layerName: 'venues' })) {
+      return;
+    }
+
     // Make sure venues is an array, or convert it to one if not.
     if (venues) {
       if (!Array.isArray(venues)) {
@@ -12328,6 +12335,17 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
    * Called when user toggles highlight settings or when data changes significantly.
    */
   function refreshAllHighlights() {
+    // Don't highlight if WME Venues layer is hidden
+    const venuesLayerVisible = sdk.Map.isLayerVisible({ layerName: 'venues' });
+    if (!venuesLayerVisible) {
+      try {
+        sdk.Map.removeAllFeaturesFromLayer({ layerName: _layer });
+      } catch (e) {
+        logDev('Error clearing highlights layer:', e);
+      }
+      return;
+    }
+
     // Clear layer once
     try {
       sdk.Map.removeAllFeaturesFromLayer({ layerName: _layer });
@@ -12365,6 +12383,11 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
    */
   function updateParkingLotHighlights(skipClear = false) {
     if (!$('#WMEPH-PLATypeFill').prop('checked')) {
+      return;
+    }
+
+    // Don't highlight if WME Venues layer is hidden
+    if (!sdk.Map.isLayerVisible({ layerName: 'venues' })) {
       return;
     }
 
@@ -12434,6 +12457,11 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
    */
   function updateFilterHighlights(skipClear = false) {
     if (!$('#WMEPH-ShowFilterHighlight').prop('checked')) {
+      return;
+    }
+
+    // Don't highlight if WME Venues layer is hidden
+    if (!sdk.Map.isLayerVisible({ layerName: 'venues' })) {
       return;
     }
 
