@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        WME Place Harmonizer Beta
 // @namespace   WazeUSA
-// @version     2026.05.03.02
+// @version     2026.05.03.03
 // @description Harmonizes, formats, and locks a selected place
 // @author      WMEPH Development Group
 // @include      https://www.waze.com/editor*
@@ -40,12 +40,37 @@
   // **************************************************************************************************************
   const SHOW_UPDATE_MESSAGE = true;
   const SCRIPT_UPDATE_MESSAGE = [
-    'v 2026.05.03.00 :',
-    '    Fixed making the "More Info" turn Green for changes in Services to Parking Lots',
-    '    WazeWrap is Back, Re-enabling Sript Update Monitor System',
-    'v 2026.05.03.01 : WazeWrap is NOT Back',
+    'v 2026.05.03.00 : Fixed making the "More Info" turn Green for changes in Services to Parking Lots',
     'v 2026.05.03.02 : WazeWrap Back via Git IO for now, and taking another shoot at finding the Setting "Active" bug',
+    'v 2026.05.03.03 : Fixed description validators (USPS/SuspectDesc/DisplayNote) in WMEPH mode by reading from DOM - validators skip in scanning mode',
   ];
+
+  // **************************************************************************************************************
+  // TODO: SDK Limitations & Workarounds
+  // **************************************************************************************************************
+  // 1. Venue.description: Not exposed in WME SDK Venue interface for READING
+  //    Current Status: updateVenue() DOES support writing, but Venue object doesn't expose reading
+  //    Current Solution: Read from DOM textarea via UPDATED_FIELDS.description selector during WMEPH mode
+  //
+  //    LOCATIONS AFFECTED (runs in both highlight and WMEPH modes):
+  //      - Line 4076: SuspectDesc - checks for google/yelp (guard: `args.description &&`)
+  //      - Line 4567, 4572: DisplayNoteIfNeeded - pharmacy/drivethru checks (guard: `!args.description ||`)
+  //      - Line 4471: MissingUSPSDescription - USPS validation (guard: `!args.highlightOnly`)
+  //
+  //    WHEN SDK ADDS description TO Venue INTERFACE:
+  //      1. Update HarmonizationArgs constructor (line 6387):
+  //         FROM: this.description = !highlightOnly ? this.getDescriptionFromDOM() : null;
+  //         TO:   this.description = venue.description;
+  //      2. DELETE getDescriptionFromDOM() method (lines 6396-6404)
+  //      3. DELETE highlightOnly check in MissingUSPSDescription (line 4470)
+  //      4. SIMPLIFY guard in SuspectDesc (line 4076):
+  //         FROM: args.description && /(google|yelp)/i.test(args.description)
+  //         TO:   /(google|yelp)/i.test(args.description)
+  //      5. SIMPLIFY guards in DisplayNoteIfNeeded (lines 4567, 4572):
+  //         FROM: !args.description || /pattern/
+  //         TO:   /pattern/
+  //      6. Update this TODO section or remove entirely
+  //
 
   // **************************************************************************************************************
   // GLOBAL VARIABLES AND CONSTANTS
@@ -4059,7 +4084,9 @@
       static defaultWLTooltip = 'Whitelist description';
 
       static venueIsFlaggable(args) {
-        return !isVenueResidential(args.venue) && args.totalSeverity < SEVERITY.RED && !this.isWhitelisted(args) && /(google|yelp)/i.test(args.description);
+        // args.description is only available in WMEPH mode (not during scanning)
+        // Only check for copyrighted content if description is accessible
+        return !isVenueResidential(args.venue) && args.totalSeverity < SEVERITY.RED && !this.isWhitelisted(args) && args.description && /(google|yelp)/i.test(args.description);
       }
     },
     ResiTypeName: class extends WLFlag {
@@ -4450,7 +4477,10 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
       static defaultWLTooltip = 'Whitelist missing USPS address line in description';
 
       static venueIsFlaggable(args) {
-        if (args.isUspsPostOffice) {
+        // Only validate description during harmonization, not during scanning.
+        // Description is not available in the SDK Venue object, so we read it from the DOM during harmonization.
+        // During scanning (highlightOnly=true), the edit form is not open so the description is inaccessible.
+        if (args.isUspsPostOffice && !args.highlightOnly) {
           const lines = args.description?.split('\n');
           return !lines?.length || !/^.{2,}, [A-Z]{2}\s{1,2}\d{5}$/.test(lines[0]);
         }
@@ -4545,10 +4575,14 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
         let showFlag = false;
         if (args.showDispNote && !isNullOrWhitespace(message)) {
           if (args.pnhMatch.pharmhours) {
-            showFlag = !/\bpharmacy\b\s*\bh(ou)?rs\b/i.test(args.venue.description);
+            // args.description is only available in WMEPH mode (not during scanning)
+            // If not available, assume we should show the flag to be safe
+            showFlag = !args.description || !/\bpharmacy\b\s*\bh(ou)?rs\b/i.test(args.description);
             // TODO: figure out what drivethruhours was supposed to be in PNH speccase column
           } else if (args.pnhMatch.drivethruhours) {
-            showFlag = !/\bdrive[\s-]?(thru|through)\b\s*\bh(ou)?rs\b/i.test(args.venue.description);
+            // args.description is only available in WMEPH mode (not during scanning)
+            // If not available, assume we should show the flag to be safe
+            showFlag = !args.description || !/\bdrive[\s-]?(thru|through)\b\s*\bh(ou)?rs\b/i.test(args.description);
           } else {
             showFlag = true;
           }
@@ -6372,13 +6406,28 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
       this.nameSuffix = nameParts?.suffix;
       this.nameBase = nameParts?.base;
       this.aliases = venue.aliases?.slice() || [];
-      this.description = venue.description;
+      // Only read description from DOM during harmonization (when edit form is open), not during scanning
+      this.description = !highlightOnly ? this.getDescriptionFromDOM() : null;
       this.url = venue.url;
       this.phone = venue.phone;
       this.openingHours = venue.openingHours;
       // Set up a variable (newBrand) to contain the brand. When harmonizing, it may be forced to a new value.
       // Other brand flags should use it since it won't be updated on the actual venue until later.
       this.brand = venue.brand;
+    }
+
+    getDescriptionFromDOM() {
+      try {
+        const descField = UPDATED_FIELDS.description;
+        const element = document.querySelector(descField.selector);
+        if (element && descField.shadowSelector) {
+          const textarea = element.shadowRoot?.querySelector(descField.shadowSelector);
+          return textarea?.value || null;
+        }
+      } catch (e) {
+        logDev(`Error reading description from DOM: ${e}`);
+      }
+      return null;
     }
   }
   class GooglePlaceContainer {
@@ -12773,7 +12822,7 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
 
     log('Starting Place Harmonizer initialization');
     await placeHarmonizerInit();
-    devTestCode();
+    //devTestCode();
     showScriptInfoAlert();
   }
 
