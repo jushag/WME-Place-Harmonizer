@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        WME Place Harmonizer Beta
 // @namespace   WazeUSA
-// @version     2026.05.03.00
+// @version     2026.05.03.01
 // @description Harmonizes, formats, and locks a selected place
 // @author      WMEPH Development Group
 // @include      https://www.waze.com/editor*
@@ -52,6 +52,8 @@
     'v 2026.05.03.00 :',
     '    Fixed making the "More Info" turn Green for changes in Services to Parking Lots',
     '    WazeWrap is Back, Re-enabling Sript Update Monitor System',
+    'v 2026.05.03.01 : WazeWrap is NOT Back',
+    
   ];
 
   // **************************************************************************************************************
@@ -12757,10 +12759,10 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
     log('Initializing SDK and categories...');
     sdk = await bootstrap({
       scriptName: SCRIPT_NAME,
-       scriptUpdateMonitor: {
-           downloadUrl: (IS_BETA_VERSION ? dec(BETA_DOWNLOAD_URL) : PROD_DOWNLOAD_URL),
-           scriptVersion: SCRIPT_VERSION,
-       },
+       //scriptUpdateMonitor: {
+       //    downloadUrl: (IS_BETA_VERSION ? dec(BETA_DOWNLOAD_URL) : PROD_DOWNLOAD_URL),
+       //    scriptVersion: SCRIPT_VERSION,
+       //},
     });
     try {
       initializeCategories();
@@ -12774,7 +12776,7 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
     log('Starting Place Harmonizer initialization');
     await placeHarmonizerInit();
     devTestCode();
-    showScriptInfoAlert();
+    //showScriptInfoAlert();
   }
 
   wmephbootstrap();
