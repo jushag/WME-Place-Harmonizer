@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        WME Place Harmonizer Beta
 // @namespace   WazeUSA
-// @version     2026.05.02.04
+// @version     2026.05.03.00
 // @description Harmonizes, formats, and locks a selected place
 // @author      WMEPH Development Group
 // @include      https://www.waze.com/editor*
@@ -44,11 +44,14 @@
     'v 2026.04.31.001 : Fixed Bug where venue spacific PNH defult services would cresh the script!',
     'v 2026.04.31.002 : Fixed Google Search "spy glass" on PUR popup',
     'v 2026.04.31.003 : Take 2 on the Bug where venue spacific PNH defult services would cresh the script! Orginal Code has this as not active!',
-    'v 2026.05.02.000 : Take 3 on the Bug where venue spacific PNH defult services would cresh the script! Orginal Code has this as not active!',
-    'v 2026.05.02.001 : Fixed Map Highlights for places with PURs when Venue layer is not active.',
-    'v 2026.05.02.002 : Set Map Highling shap for venue type resadental to triangle!',
-    'v 2026.05.02.003 : Fixed loading and mangment functions for WhiteLists',
-    'v 2026.05.02.004 : Optimize: Skip full harmonization for services-only venue changes',
+    'v 2026.05.02.00 : Take 3 on the Bug where venue spacific PNH defult services would cresh the script! Orginal Code has this as not active!',
+    'v 2026.05.02.01 : Fixed Map Highlights for places with PURs when Venue layer is not active.',
+    'v 2026.05.02.02 : Set Map Highling shape for venue type resadental to triangle!',
+    'v 2026.05.02.03 : Fixed loading and mangment functions for WhiteLists',
+    'v 2026.05.02.04 : Optimize: Skip full harmonization for services-only venue changes',
+    'v 2026.05.03.00 :',
+    '    Fixed making the "More Info" turn Green for changes in Services to Parking Lots',
+    '    WazeWrap is Back, Re-enabling Sript Update Monitor System',
   ];
 
   // **************************************************************************************************************
@@ -482,27 +485,7 @@
       });
     },
     init() {
-      [
-        'VALLET_SERVICE',
-        'DRIVETHROUGH',
-        'WI_FI',
-        'RESTROOMS',
-        'CREDIT_CARDS',
-        'RESERVATIONS',
-        'OUTSIDE_SEATING',
-        'AIR_CONDITIONING',
-        'PARKING_FOR_CUSTOMERS',
-        'DELIVERIES',
-        'TAKE_AWAY',
-        'WHEELCHAIR_ACCESSIBLE',
-        'DISABILITY_PARKING',
-        'CURBSIDE_PICKUP',
-        'CARPOOL_PARKING',
-        'EV_CHARGING_STATION',
-        'CAR_WASH',
-        'SECURITY',
-        'AIRPORT_SHUTTLE',
-      ].forEach((service) => {
+      uniq(WME_SERVICES_ARRAY).forEach((service) => {
         const propName = `services_${service}`;
         this[propName] = { updated: false, selector: `.venue label[for="service-checkbox-${service}"]`, tab: 'more-info' };
       });
@@ -12774,12 +12757,10 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
     log('Initializing SDK and categories...');
     sdk = await bootstrap({
       scriptName: SCRIPT_NAME,
-      // scriptUpdateMonitor disabled — WazeWrap currently unavailable
-      // Uncomment when WazeWrap is back online
-      // scriptUpdateMonitor: {
-      //     downloadUrl: (IS_BETA_VERSION ? dec(BETA_DOWNLOAD_URL) : PROD_DOWNLOAD_URL),
-      //     scriptVersion: SCRIPT_VERSION,
-      // },
+       scriptUpdateMonitor: {
+           downloadUrl: (IS_BETA_VERSION ? dec(BETA_DOWNLOAD_URL) : PROD_DOWNLOAD_URL),
+           scriptVersion: SCRIPT_VERSION,
+       },
     });
     try {
       initializeCategories();
@@ -12793,7 +12774,7 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
     log('Starting Place Harmonizer initialization');
     await placeHarmonizerInit();
     devTestCode();
-    //showScriptInfoAlert();
+    showScriptInfoAlert();
   }
 
   wmephbootstrap();
