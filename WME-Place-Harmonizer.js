@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        WME Place Harmonizer Beta
 // @namespace   WazeUSA
-// @version     2026.05.02.03
+// @version     2026.05.02.04
 // @description Harmonizes, formats, and locks a selected place
 // @author      WMEPH Development Group
 // @include      https://www.waze.com/editor*
@@ -48,6 +48,7 @@
     'v 2026.05.02.001 : Fixed Map Highlights for places with PURs when Venue layer is not active.',
     'v 2026.05.02.002 : Set Map Highling shap for venue type resadental to triangle!',
     'v 2026.05.02.003 : Fixed loading and mangment functions for WhiteLists',
+    'v 2026.05.02.004 : Optimize: Skip full harmonization for services-only venue changes',
   ];
 
   // **************************************************************************************************************
@@ -177,6 +178,7 @@
   // State flags
   let _disableHighlightTest = false; // Set to true to temporarily disable highlight checks immediately when venues change.
   let _isHarmonizing = false; // Prevent recursive harmonization when venue data changes during harmonization
+  let _previousVenueServices = null; // Tracks services state to detect services-only changes
 
   // User information object
   const USER = {
@@ -6879,14 +6881,29 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
 
   function onVenuesChanged(venueProxies) {
     deleteDupeLabel();
+    _previousVenueServices = null; // Reset when venue selection changes
 
     const venue = getSelectedVenue();
     if (venueProxies.map((proxy) => proxy.id).includes(venue?.id)) {
       if ($('#WMEPH_banner').length && venue?.id && !_isHarmonizing) {
-        // Auto-harmonize when venue with banner is modified (but not if already harmonizing)
-        harmonizePlaceGo(venue, 'harmonize');
-        // Refresh all highlights to sync layer features with updated venue properties
-        refreshAllHighlights();
+        // Compare current services with previous state to detect services-only changes
+        const currentServices = JSON.stringify((venue.services || []).sort());
+        const isServicesOnlyChange = _previousVenueServices !== null &&
+                                     _previousVenueServices === currentServices;
+
+        // Skip harmonization if ONLY services changed (UI sync handles it)
+        if (!isServicesOnlyChange) {
+          // Auto-harmonize when venue with banner is modified (but not if already harmonizing)
+          harmonizePlaceGo(venue, 'harmonize');
+          // Refresh all highlights to sync layer features with updated venue properties
+          refreshAllHighlights();
+        } else if (_previousVenueServices !== null) {
+          // Log for dev visibility
+          console.log(`✓ WMEPH-β (dev): Skipped full re-run — services UI sync only`);
+        }
+
+        // Update tracker for next change
+        _previousVenueServices = currentServices;
       }
 
       updateWmephPanel();
@@ -8986,6 +9003,7 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
     } finally {
       // Restore harmonization flag
       _isHarmonizing = wasHarmonizing;
+      _previousVenueServices = null; // Reset after harmonization completes
 
       // After harmonization flag is restored, refresh highlights only if this was a full harmonization (not highlight-only)
       if (!wasHarmonizing && useFlag === 'harmonize') {
