@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        WME Place Harmonizer Beta
 // @namespace   WazeUSA
-// @version     2026.05.03.03
+// @version     2026.05.03.05
 // @description Harmonizes, formats, and locks a selected place
 // @author      WMEPH Development Group
 // @include      https://www.waze.com/editor*
@@ -43,6 +43,7 @@
     'v 2026.05.03.00 : Fixed making the "More Info" turn Green for changes in Services to Parking Lots',
     'v 2026.05.03.02 : WazeWrap Back via Git IO for now, and taking another shoot at finding the Setting "Active" bug',
     'v 2026.05.03.03 : Fixed description validators (USPS/SuspectDesc/DisplayNote) in WMEPH mode by reading from DOM - validators skip in scanning mode',
+    'v 2026.05.03.05 : Fixed crash when "Hide Report script error button" setting is active - removed dead code accessing non-existent button',
   ];
 
   // **************************************************************************************************************
@@ -8160,9 +8161,8 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
           _buttonBanner2.placesWiki.active = false;
         }
 
-        if ($('#WMEPH-HideReportError').prop('checked')) {
-          _buttonBanner2.PlaceErrorForumPost.active = false;
-        }
+        // NOTE: PlaceErrorForumPost button is not implemented (commented out in getButtonBanner2),
+        // so we don't try to access it
 
         // reset PNH lock level
         pnhLockLevel = -1;
@@ -11438,7 +11438,6 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
       'WMEPH-WebSearchNewTab',
       'WMEPH-EnableIAZoom',
       'WMEPH-HidePlacesWiki',
-      'WMEPH-HideReportError',
       'WMEPH-HideServicesButtons',
       'WMEPH-HidePURWebSearch',
       'WMEPH-ExcludePLADupes',
@@ -11560,7 +11559,6 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
     createSettingsCheckbox($harmonizerTab, 'WMEPH-WebSearchNewTab', 'Open URL & Search Results in new tab instead of new window');
     createSettingsCheckbox($harmonizerTab, 'WMEPH-EnableIAZoom', 'Enable zoom & center for places with no address');
     createSettingsCheckbox($harmonizerTab, 'WMEPH-HidePlacesWiki', 'Hide "Places Wiki" button in results banner');
-    createSettingsCheckbox($harmonizerTab, 'WMEPH-HideReportError', 'Hide "Report script error" button in results banner');
     createSettingsCheckbox($harmonizerTab, 'WMEPH-HideServicesButtons', 'Hide services buttons in results banner');
     createSettingsCheckbox($harmonizerTab, 'WMEPH-HidePURWebSearch', 'Hide "Web Search" button on PUR popups');
     createSettingsCheckbox($harmonizerTab, 'WMEPH-ExcludePLADupes', 'Exclude parking lots when searching for duplicate places');
@@ -11958,7 +11956,6 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
       'WMEPH-EnableCloneMode',
       'WMEPH-EnableIAZoom',
       'WMEPH-HidePlacesWiki',
-      'WMEPH-HideReportError',
       'WMEPH-HideServicesButtons',
       'WMEPH-HidePURWebSearch',
       'WMEPH-ExcludePLADupes',
