@@ -10,7 +10,7 @@
 // @include      https://beta.waze.com/*/editor*
 // @exclude      https://www.waze.com/user/editor*
 // @exclude      https://www.waze.com/dashboard/editor
-// @require     https://wazedev.github.io/WazeWrap/WazeWrap.js
+// @require      https://greasyfork.org/scripts/24851-wazewrap/code/WazeWrap.js
 // @require     https://update.greasyfork.org/scripts/509664/WME%20Utils%20-%20Bootstrap.js
 // @require     https://greasyfork.org/scripts/37486-wme-utils-hoursparser/code/WME%20Utils%20-%20HoursParser.js
 // @require     https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.4.4/lz-string.min.js
@@ -12803,10 +12803,10 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
     log('Initializing SDK and categories...');
     sdk = await bootstrap({
       scriptName: SCRIPT_NAME,
-       scriptUpdateMonitor: {
-           downloadUrl: (IS_BETA_VERSION ? dec(BETA_DOWNLOAD_URL) : PROD_DOWNLOAD_URL),
-           scriptVersion: SCRIPT_VERSION,
-       },
+       //scriptUpdateMonitor: {
+       //    downloadUrl: (IS_BETA_VERSION ? dec(BETA_DOWNLOAD_URL) : PROD_DOWNLOAD_URL),
+       //    scriptVersion: SCRIPT_VERSION,
+       //},
     });
     try {
       initializeCategories();
@@ -12820,7 +12820,7 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
     log('Starting Place Harmonizer initialization');
     await placeHarmonizerInit();
     //devTestCode();
-    showScriptInfoAlert();
+    //showScriptInfoAlert();
   }
 
   wmephbootstrap();
