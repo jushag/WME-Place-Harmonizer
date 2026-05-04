@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        WME Place Harmonizer Beta
 // @namespace   WazeUSA
-// @version     2026.05.03.05
+// @version     2026.05.04.00
 // @description Harmonizes, formats, and locks a selected place
 // @author      WMEPH Development Group
 // @include      https://www.waze.com/editor*
@@ -44,6 +44,7 @@
     'v 2026.05.03.02 : WazeWrap Back via Git IO for now, and taking another shoot at finding the Setting "Active" bug',
     'v 2026.05.03.03 : Fixed description validators (USPS/SuspectDesc/DisplayNote) in WMEPH mode by reading from DOM - validators skip in scanning mode',
     'v 2026.05.03.05 : Fixed crash when "Hide Report script error button" setting is active - removed dead code accessing non-existent button',
+    'v 2026.05.04.00 : Relase WW and scriptUpdateMonitor',
   ];
 
   // **************************************************************************************************************
@@ -12803,10 +12804,10 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
     log('Initializing SDK and categories...');
     sdk = await bootstrap({
       scriptName: SCRIPT_NAME,
-       //scriptUpdateMonitor: {
-       //    downloadUrl: (IS_BETA_VERSION ? dec(BETA_DOWNLOAD_URL) : PROD_DOWNLOAD_URL),
-       //    scriptVersion: SCRIPT_VERSION,
-       //},
+       scriptUpdateMonitor: {
+           downloadUrl: (IS_BETA_VERSION ? dec(BETA_DOWNLOAD_URL) : PROD_DOWNLOAD_URL),
+           scriptVersion: SCRIPT_VERSION,
+       },
     });
     try {
       initializeCategories();
@@ -12820,7 +12821,7 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
     log('Starting Place Harmonizer initialization');
     await placeHarmonizerInit();
     //devTestCode();
-    //showScriptInfoAlert();
+    showScriptInfoAlert();
   }
 
   wmephbootstrap();
