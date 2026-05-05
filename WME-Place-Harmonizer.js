@@ -5947,9 +5947,10 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
           const parts = getNameParts(this.#originalName);
           name = titleCase(parts.base);
           if (parts.base !== name) {
-            addUpdateAction(this.args.venue, { name: name + (parts.suffix || '') });
+            addUpdateAction(this.args.venue, { name: name + (parts.suffix || '') }, undefined, true);
+          } else {
+            harmonizePlaceGo(this.args.venue, 'harmonize');
           }
-          harmonizePlaceGo(this.args.venue, 'harmonize');
         } else {
           $('button#WMEPH_titleCaseName').text('Are you sure?').after(' The name has changed. This will overwrite the new name.');
           this.#confirmChange = true;
