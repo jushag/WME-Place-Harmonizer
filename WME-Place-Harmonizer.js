@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        WME Place Harmonizer Beta
 // @namespace   WazeUSA
-// @version     2026.05.05.02
+// @version     2026.05.06.00
 // @description Harmonizes, formats, and locks a selected place
 // @author      WMEPH Development Group
 // @include      https://www.waze.com/editor*
@@ -40,11 +40,10 @@
   // **************************************************************************************************************
   const SHOW_UPDATE_MESSAGE = true;
   const SCRIPT_UPDATE_MESSAGE = [
-    'v 2026.05.04.00 : Relase WW and scriptUpdateMonitor',
-    'v 2026.05.04.01 : Updated Services Icons for Active / Non-Active color in Light and Dark Mode',
     'v 2026.05.05.00 : Fixed Convert Area to Point Place function',
     'v 2026.05.05.01 : Fixed Entry/exit point function',
     'v 2026.05.05.02 : Fixed Detected address fields to places with no address',
+    'v 2026.05.06.00 : Fixed: Only test for missing Navagation points on PLA',
   ];
 
   // **************************************************************************************************************
@@ -287,15 +286,15 @@
   // Common payment types found at: https://wazeopedia.waze.com/wiki/USA/Places/EV_charging_station
   const /* The above code is a comment in JavaScript. It appears to be defining a constant or variable
   named COMMON_EV_PAYMENT_METHODS and using a delimiter " */
-  
-  COMMON_EV_PAYMENT_METHODS = {
-    'Blink Charging': [EV_PAYMENT_METHOD.APP, EV_PAYMENT_METHOD.MEMBERSHIP_CARD, EV_PAYMENT_METHOD.PLUG_IN_AUTO_CHARGER, EV_PAYMENT_METHOD.OTHER],
-    ChargePoint: [EV_PAYMENT_METHOD.APP, EV_PAYMENT_METHOD.CREDIT, EV_PAYMENT_METHOD.DEBIT, EV_PAYMENT_METHOD.MEMBERSHIP_CARD],
-    'Electrify America': [EV_PAYMENT_METHOD.APP, EV_PAYMENT_METHOD.CREDIT, EV_PAYMENT_METHOD.DEBIT, EV_PAYMENT_METHOD.MEMBERSHIP_CARD, EV_PAYMENT_METHOD.PLUG_IN_AUTO_CHARGER],
-    EVgo: [EV_PAYMENT_METHOD.APP, EV_PAYMENT_METHOD.CREDIT, EV_PAYMENT_METHOD.DEBIT, EV_PAYMENT_METHOD.MEMBERSHIP_CARD, EV_PAYMENT_METHOD.PLUG_IN_AUTO_CHARGER],
-    SemaConnect: [EV_PAYMENT_METHOD.APP, EV_PAYMENT_METHOD.MEMBERSHIP_CARD, EV_PAYMENT_METHOD.OTHER],
-    Tesla: [EV_PAYMENT_METHOD.PLUG_IN_AUTO_CHARGER],
-  };
+
+    COMMON_EV_PAYMENT_METHODS = {
+      'Blink Charging': [EV_PAYMENT_METHOD.APP, EV_PAYMENT_METHOD.MEMBERSHIP_CARD, EV_PAYMENT_METHOD.PLUG_IN_AUTO_CHARGER, EV_PAYMENT_METHOD.OTHER],
+      ChargePoint: [EV_PAYMENT_METHOD.APP, EV_PAYMENT_METHOD.CREDIT, EV_PAYMENT_METHOD.DEBIT, EV_PAYMENT_METHOD.MEMBERSHIP_CARD],
+      'Electrify America': [EV_PAYMENT_METHOD.APP, EV_PAYMENT_METHOD.CREDIT, EV_PAYMENT_METHOD.DEBIT, EV_PAYMENT_METHOD.MEMBERSHIP_CARD, EV_PAYMENT_METHOD.PLUG_IN_AUTO_CHARGER],
+      EVgo: [EV_PAYMENT_METHOD.APP, EV_PAYMENT_METHOD.CREDIT, EV_PAYMENT_METHOD.DEBIT, EV_PAYMENT_METHOD.MEMBERSHIP_CARD, EV_PAYMENT_METHOD.PLUG_IN_AUTO_CHARGER],
+      SemaConnect: [EV_PAYMENT_METHOD.APP, EV_PAYMENT_METHOD.MEMBERSHIP_CARD, EV_PAYMENT_METHOD.OTHER],
+      Tesla: [EV_PAYMENT_METHOD.PLUG_IN_AUTO_CHARGER],
+    };
   const GENERAL_SERVICES = [
     'VALLET_SERVICE',
     'DRIVETHROUGH',
@@ -2830,9 +2829,6 @@
     set buttonTooltip(value) {
       this.#buttonTooltip = value;
     }
-
-    // 5/19/2019 (mapomatic) This base class action function doesn't seem to be necessary.
-    // action() { } // overwrite this
   }
   class WLFlag extends FlagBase {
     static defaultWLTooltip = 'Whitelist this message';
@@ -5377,7 +5373,7 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
       }
 
       static venueIsFlaggable(args) {
-        if (!args.categories.includes(CAT.PARKING_LOT)) return false;
+        if (!isVenueParkingLot(args.venue)) return false;
         try {
           const costType = sdk.DataModel.Venues.ParkingLot.getCostType({ venueId: args.venue.id });
           return !costType || costType === 'UNKNOWN';
@@ -5408,12 +5404,12 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
       static defaultButtonText = 'Go there';
 
       static venueIsFlaggable(args) {
-        if (args.categories.includes(CAT.PARKING_LOT)) {
-          const catAttr = args.venue.categoryAttributes;
-          const parkAttr = catAttr ? catAttr.PARKING_LOT : undefined;
-          if (parkAttr && parkAttr.costType && parkAttr.costType !== 'FREE' && parkAttr.costType !== 'UNKNOWN' && (!parkAttr.paymentType || !parkAttr.paymentType.length)) {
-            return true;
-          }
+        if (!isVenueParkingLot(args.venue)) return false;
+
+        const catAttr = args.venue.categoryAttributes;
+        const parkAttr = catAttr ? catAttr.PARKING_LOT : undefined;
+        if (parkAttr && parkAttr.costType && parkAttr.costType !== 'FREE' && parkAttr.costType !== 'UNKNOWN' && (!parkAttr.paymentType || !parkAttr.paymentType.length)) {
+          return true;
         }
         return false;
       }
@@ -5433,7 +5429,7 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
       noLock = true;
 
       static venueIsFlaggable(args) {
-        if (!args.categories.includes(CAT.PARKING_LOT)) return false;
+        if (!isVenueParkingLot(args.venue)) return false;
         try {
           const lotTypes = sdk.DataModel.Venues.ParkingLot.getLotTypes({ venueId: args.venue.id });
           return !lotTypes || lotTypes.length === 0;
@@ -5482,7 +5478,7 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
       }
 
       static venueIsFlaggable(args) {
-        if (args.highlightOnly || !args.categories.includes(CAT.PARKING_LOT)) return false;
+        if (args.highlightOnly || !isVenueParkingLot(args.venue)) return false;
         try {
           const spotEstimate = sdk.DataModel.Venues.ParkingLot.getEstimatedNumberOfSpots({ venueId: args.venue.id });
           return !spotEstimate || spotEstimate === 'R_1_TO_10';
@@ -5498,14 +5494,10 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
       static defaultButtonTooltip = 'Add an entry/exit point';
 
       static venueIsFlaggable(args) {
-        // Exclude categories that don't need navigationPoints
-        const categoriesToExclude = [CAT.BRIDGE, CAT.ISLAND, CAT.FOREST_GROVE, CAT.SEA_LAKE_POOL, CAT.RIVER_STREAM, CAT.CANAL, CAT.DAM, CAT.TUNNEL, CAT.JUNCTION_INTERCHANGE, CAT.RESIDENCE_HOME];
+        if (!isVenueParkingLot(args.venue)) return false;
 
-        if (categoriesToExclude.some((cat) => args.categories.includes(cat))) {
-          return false;
-        }
-
-        return !args.venue?.navigationPoints?.length;
+        const hasNavPoints = args.venue.navigationPoints?.length > 0;
+        return !hasNavPoints;
       }
 
       action() {
@@ -5541,15 +5533,16 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
 
       static venueIsFlaggable(args) {
         if (!isVenueParkingLot(args.venue)) return false;
-        try {
-          const fullVenue = sdk.DataModel.Venues.getById({ venueId: args.venue.id });
-          if (!fullVenue?.navigationPoints?.length) return false;
-          const stopPoint = fullVenue.navigationPoints[0].point.coordinates;
-          const areaCenter = turf.centroid(args.venue.geometry).geometry.coordinates;
-          return stopPoint[0] === areaCenter[0] && stopPoint[1] === areaCenter[1];
-        } catch {
-          return false;
-        }
+
+        const { navigationPoints, geometry } = args.venue;
+        if (!navigationPoints?.length) return false;
+
+        // Get the primary navigation point, if one exists. If none, get the first point.
+        const primaryPoint = navigationPoints.find((pt) => pt.isPrimary === true) || navigationPoints[0];
+        const stopPoint = primaryPoint.point.coordinates;
+
+        const areaCenter = turf.centroid(geometry).geometry.coordinates;
+        return stopPoint[0] === areaCenter[0] && stopPoint[1] === areaCenter[1];
       }
     },
     PlaCanExitWhileClosed: class extends ActionFlag {
@@ -5557,7 +5550,7 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
       static defaultButtonText = 'Yes';
 
       static venueIsFlaggable(args) {
-        if (args.highlightOnly || !args.categories.includes(CAT.PARKING_LOT)) return false;
+        if (args.highlightOnly || !isVenueParkingLot(args.venue)) return false;
         if (!($('#WMEPH-ShowPLAExitWhileClosed').prop('checked') || !(args.openingHours.length === 0 || is247Hours(args.openingHours)))) return false;
         try {
           const canExit = sdk.DataModel.Venues.ParkingLot.canExitWhileClosed({ venueId: args.venue.id });
@@ -5579,13 +5572,8 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
       static defaultButtonText = 'Yes';
 
       static venueIsFlaggable(args) {
-        if (args.highlightOnly || !args.categories.includes(CAT.PARKING_LOT)) return false;
-        try {
-          const fullVenue = sdk.DataModel.Venues.getById({ venueId: args.venue.id });
-          return !fullVenue?.services?.includes('DISABILITY_PARKING');
-        } catch {
-          return !args.venue.services?.includes('DISABILITY_PARKING');
-        }
+        if (args.highlightOnly || !isVenueParkingLot(args.venue)) return false;
+        return !args.venue.services?.includes('DISABILITY_PARKING');
       }
 
       action() {
@@ -8405,6 +8393,14 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
           }
         } else {
           args.pnhMatch = Pnh.findMatch(args.nameBase, args.state2L, args.regionCode, args.countryCode, args.categories, venue, true);
+        }
+
+        // DEBUG: Log what findMatch returned for multiple match detection
+        if (args.pnhMatch?.length > 1 && args.pnhMatch[0] !== 'NoMatch' && args.pnhMatch[0] !== 'ApprovalNeeded') {
+          logDev(`Multiple PNH matches found for "${args.nameBase}" (state: ${args.state2L}, region: ${args.regionCode})`);
+          args.pnhMatch.forEach((match, idx) => {
+            logDev(`  Match ${idx}: Order ${match.order}, Name: ${match.name}, Category: ${match.primaryCategory}, Regions: ${match.regions.join(', ')}, BrandParentLevel: ${match.brandParentLevel}`);
+          });
         }
 
         args.pnhNameRegMatch = args.pnhMatch?.length && args.pnhMatch[0] !== 'NoMatch' && args.pnhMatch[0] !== 'ApprovalNeeded' && args.pnhMatch[0] !== 'Highlight';
