@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        WME Place Harmonizer Beta
 // @namespace   WazeUSA
-// @version     2026.05.06.00
+// @version     2026.05.06.02
 // @description Harmonizes, formats, and locks a selected place
 // @author      WMEPH Development Group
 // @include      https://www.waze.com/editor*
@@ -45,6 +45,7 @@
     'v 2026.05.05.02 : Fixed Detected address fields to places with no address',
     'v 2026.05.06.00 : Fixed: Only test for missing Navagation points on PLA',
     'v 2026.05.06.01 : Fix address inference: accurate distance calculation & optimized node-based search',
+    'v 2026.05.06.02 : Fix venues with Locke levels below standers to use strokeDashstyle',
   ];
 
   // **************************************************************************************************************
@@ -122,8 +123,8 @@
     [SEVERITY.RED]: '#FF0000', // major issues
     [SEVERITY.PINK]: '#FF1493', // extreme issues
     [SEVERITY.ORANGE]: '#FFA500', // other issues
-    lock: '#8B008B', // locked
-    lock1: '#FF69B4', // lock issue
+    lock: '#08d608', // Used when SEVERITY = GREEN, but venue is not locked to regional standereds (old #8B008B)
+    lock1: '#0000FF', //Used when SEVERITY = BLUE, but venue is not locked to regional standereds (old #FF69B4)
     adLock: '#FFD700', // ad-locked
   };
 
@@ -12126,6 +12127,9 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
           getGraphicName: ({ feature }) => {
             return feature?.properties?.isResidential ? 'triangle' : 'circle';
           },
+          getStrokeDashstyle: ({ feature }) => {
+            return feature?.properties?.isResidential ? '2 4' : '2 10';
+          },
         },
         styleRules: [
           // Rule 1: Filter highlight (wmephHighlight = '1') - magenta stroke only, highest priority
@@ -12149,8 +12153,8 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
               fillOpacity: 0,
               strokeColor: '${getSeverityColor}',
               strokeWidth: 5,
-              strokeOpacity: 0.8,
-              //strokeDashstyle: 'dash'
+              strokeOpacity: 1,
+              strokeDashstyle: '${getStrokeDashstyle}'
             },
           },
           // Rule 3: Parking lot with severity - both fill (parking type) and stroke (severity severity)
