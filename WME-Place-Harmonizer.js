@@ -45,7 +45,7 @@
     'v 2026.05.05.02 : Fixed Detected address fields to places with no address',
     'v 2026.05.06.00 : Fixed: Only test for missing Navagation points on PLA',
     'v 2026.05.06.01 : Fix address inference: accurate distance calculation & optimized node-based search',
-    'v 2026.05.06.02 : Fix venues with Locke levels below standers to use strokeDashstyle',
+    'v 2026.05.06.02 : Fixed venues with Lock levels below regional standards to use strokeDashstyle',
   ];
 
   // **************************************************************************************************************
