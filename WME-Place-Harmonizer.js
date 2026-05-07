@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        WME Place Harmonizer Beta
 // @namespace   WazeUSA
-// @version     2026.05.06.02
+// @version     2026.05.07.00
 // @description Harmonizes, formats, and locks a selected place
 // @author      WMEPH Development Group
 // @include      https://www.waze.com/editor*
@@ -44,8 +44,9 @@
     'v 2026.05.05.01 : Fixed Entry/exit point function',
     'v 2026.05.05.02 : Fixed Detected address fields to places with no address',
     'v 2026.05.06.00 : Fixed: Only test for missing Navagation points on PLA',
-    'v 2026.05.06.01 : Fix address inference: accurate distance calculation & optimized node-based search',
+    'v 2026.05.06.01 : Fixed: Address inference: accurate distance calculation & optimized node-based search',
     'v 2026.05.06.02 : Fixed venues with Lock levels below regional standards to use strokeDashstyle',
+    'v 2026.05.07.00 : Fixed: Parking lot detection & polygon dashed stroke styling for severity highlights',
   ];
 
   // **************************************************************************************************************
@@ -1633,12 +1634,11 @@
   /**
    * Checks if a venue is a parking lot.
    * @param {object|null} venue Venue object with categories array
-   * @returns {boolean} True if venue's primary category is PARKING_LOT
+   * @returns {boolean} True if venue has PARKING_LOT category
    */
   function isVenueParkingLot(venue) {
     if (!venue) return false;
-    const primaryCategory = venue.categories?.[0];
-    return primaryCategory === 'PARKING_LOT';
+    return venue.categories?.includes('PARKING_LOT') ?? false;
   }
 
   /**
@@ -2988,7 +2988,7 @@
           !args.categories.includes(CAT.RESIDENCE_HOME) &&
           !args.categories.includes('RESIDENTIAL') && // SDK residential category
           !args.nameBase?.replace(/[^A-Za-z0-9]/g, '') &&
-          ![CAT.ISLAND, CAT.FOREST_GROVE, CAT.SEA_LAKE_POOL, CAT.RIVER_STREAM, CAT.CANAL, CAT.PARKING_LOT].includes(args.categories[0]) &&
+          ![CAT.ISLAND, CAT.FOREST_GROVE, CAT.SEA_LAKE_POOL, CAT.RIVER_STREAM, CAT.CANAL, 'PARKING_LOT'].includes(args.categories[0]) &&
           !(args.categories.includes(CAT.GAS_STATION) && args.brand)
         );
       }
@@ -3044,7 +3044,7 @@
       }
 
       static venueIsFlaggable(args) {
-        if (!args.categories.includes(CAT.PARKING_LOT)) return false;
+        if (!args.categories.includes('PARKING_LOT')) return false;
         try {
           const parkingType = sdk.DataModel.Venues.ParkingLot.getParkingLotType({ venueId: args.venue.id });
           return parkingType === 'PUBLIC';
@@ -3072,7 +3072,7 @@
       noLock = true;
 
       static venueIsFlaggable(args) {
-        return args.categories.includes(CAT.PARKING_LOT) && !args.nameBase?.replace(/[^A-Za-z0-9]/g, '').length && args.venue.lockRank < 2;
+        return args.categories.includes('PARKING_LOT') && !args.nameBase?.replace(/[^A-Za-z0-9]/g, '').length && args.venue.lockRank < 2;
       }
     },
     PlaNameNonStandard: class extends WLFlag {
@@ -3106,7 +3106,7 @@
         return (
           !args.highlightOnly &&
           !this.isWhitelisted(args) &&
-          !args.categories.includes(CAT.RESIDENCE_HOME) &&
+          !args.categories.includes(RESIDENCE) &&
           args.addr?.state.name === 'Indiana' &&
           /\b(beers?|wines?|liquors?|spirits)\b/i.test(args.nameBase) &&
           !args.openingHours.some((entry) => entry.days.includes(0))
@@ -3649,7 +3649,7 @@
       get message() {
         let msg = `No HN: <input type="text" id="${Flag.HnMissing.#TEXTBOX_ID}" autocomplete="off" ` + 'style="font-size:0.85em;width:100px;padding-left:2px;color:#000;" > ';
 
-        if (this.args.categories.includes(CAT.PARKING_LOT) && this.args.venue.lockRank < 2) {
+        if (this.args.categories.includes('PARKING_LOT') && this.args.venue.lockRank < 2) {
           if (USER.rank < 3) {
             msg += 'Request an R3+ lock to confirm no HN.';
           } else {
@@ -3666,7 +3666,7 @@
         if (args.state2L === 'PR' || args.categories[0] === CAT.SCENIC_LOOKOUT_VIEWPOINT) {
           severity = SEVERITY.GREEN;
           showWL = false;
-        } else if (args.categories.includes(CAT.PARKING_LOT)) {
+        } else if (args.categories.includes('PARKING_LOT')) {
           showWL = false;
           if (args.venue.lockRank < 2) {
             noLock = true;
@@ -4673,7 +4673,7 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
       }
 
       static venueIsFlaggable(args) {
-        if (USER.rank >= 2 && args.venue.externalProviderIds && !(args.categories.includes(CAT.PARKING_LOT) && args.ignoreParkingLots)) {
+        if (USER.rank >= 2 && args.venue.externalProviderIds && !(args.categories.includes('PARKING_LOT') && args.ignoreParkingLots)) {
           if (!args.categories.some((cat) => this.#categoriesToIgnore.includes(cat))) {
             const provIDs = args.venue.externalProviderIds;
             if (!(provIDs && provIDs.length)) {
@@ -4939,7 +4939,7 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
             CAT.MOVIE_THEATER,
             CAT.SHOPPING_CENTER,
             CAT.RELIGIOUS_CENTER,
-            CAT.PARKING_LOT,
+            'PARKING_LOT',
             CAT.PARK,
             CAT.PLAYGROUND,
             CAT.AIRPORT,
@@ -5493,6 +5493,23 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
         } catch {
           return false;
         }
+      }
+
+      static setupClickHandlers() {
+        $('.wmeph-pla-spaces-btn').click((evt) => {
+          const selectedVenue = getSelectedVenue();
+          const selectedValue = $(evt.currentTarget).attr('id').replace('wmeph_', '');
+          try {
+            sdk.DataModel.Venues.ParkingLot.setEstimatedNumberOfSpots({
+              venueId: selectedVenue.id,
+              estimatedNumberOfSpots: selectedValue,
+            });
+            UPDATED_FIELDS.parkingSpots.updated = true;
+            addUpdateAction(selectedVenue, {}, null, true);
+          } catch (e) {
+            logDev('Error setting parking spaces:', e);
+          }
+        });
       }
     },
     NoPlaStopPoint: class extends ActionFlag {
@@ -6090,7 +6107,7 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
 
       // TODO: Can this be put into venueIsFlaggable?
       static eval(args) {
-        const isUsps = args.countryCode === PNH_DATA.USA.countryCode && !args.categories.includes(CAT.PARKING_LOT) && args.categories.includes(CAT.POST_OFFICE);
+        const isUsps = args.countryCode === PNH_DATA.USA.countryCode && !args.categories.includes('PARKING_LOT') && args.categories.includes(CAT.POST_OFFICE);
         let storeFinderUrl;
         let isCustom = false;
         if (isUsps) {
@@ -7088,6 +7105,13 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
     const colorFeaturesToAdd = [];
     venues.forEach((venue) => {
       if (venue && venue.id) {
+        // Add PARKING_LOT category if venue has parking lot services
+        if (venue.services?.some((service) => PARKING_LOT_SERVICES.includes(service))) {
+          if (!venue.categories.includes('PARKING_LOT')) {
+            venue.categories.push('PARKING_LOT');
+          }
+        }
+
         // Highlighting logic would go here
         // Severity can be: 0, 'lock', 1, 2, 3, 4, or 'high'. Set to
         // anything else to use default WME style.
@@ -7105,6 +7129,7 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
               wmephStats.cacheHits++; // Direct cache hit (no harmonizePlaceGo call)
             }
             venue.wmephSeverity = severity;
+            venue.wmephParkingType = sdk.DataModel.Venues.ParkingLot.getParkingLotType({ venueId: venue.id }) || null;
 
             // Add color feature to layer for visualization
             if (venue.geometry && severity !== undefined) {
@@ -7116,6 +7141,7 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
                   wmephSeverity: severity,
                   venueId: venue.id,
                   name: venue.name,
+                  isPoint: venue.geometry?.type === 'Point',
                   isResidential: venue.residential === true || venue.categories?.includes('RESIDENTIAL'),
                 },
               });
@@ -8725,7 +8751,7 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
 
           args.hoursOverlap = venueHasOverlappingHours(args.openingHours);
 
-          args.isUspsPostOffice = args.countryCode === PNH_DATA.USA.countryCode && !args.categories.includes(CAT.PARKING_LOT) && args.categories.includes(CAT.POST_OFFICE);
+          args.isUspsPostOffice = args.countryCode === PNH_DATA.USA.countryCode && !args.categories.includes('PARKING_LOT') && args.categories.includes(CAT.POST_OFFICE);
 
           if (!args.highlightOnly) {
             // Highlight 24/7 button if hours are set that way, and add button for all places
@@ -8955,7 +8981,7 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
           args.levelToLock = args.defaultLockLevel;
         }
         if (args.regionCode === 'SER') {
-          if (args.categories.includes(CAT.COLLEGE_UNIVERSITY) && args.categories.includes(CAT.PARKING_LOT)) {
+          if (args.categories.includes(CAT.COLLEGE_UNIVERSITY) && args.categories.includes('PARKING_LOT')) {
             args.levelToLock = LOCK_LEVEL_4;
           } else if (
             isVenuePoint(venue) &&
@@ -9120,7 +9146,7 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
    * @param {string} name The venue name to search for duplicates of.
    * @param {Array<string>} aliases Alternative names to also check for duplicates.
    * @param {Object} addr The venue's address object (street, city, state, country).
-   * @param {boolean} placePL Whether this venue is a parking lot.
+   * @param {string} placePL The place permalink.
    */
   function runDuplicateFinder(venue, name, aliases, addr, placePL) {
     const venueID = venue.id;
@@ -9360,22 +9386,8 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
     // Setup bannButt2 onclicks
     setupButtonsOld(_buttonBanner2);
 
-    // Add click handlers for parking lot helper buttons.
-    // TODO: move this to PlaSpaces class
-    $('.wmeph-pla-spaces-btn').click((evt) => {
-      const selectedVenue = getSelectedVenue();
-      const selectedValue = $(evt.currentTarget).attr('id').replace('wmeph_', '');
-      try {
-        sdk.DataModel.Venues.ParkingLot.setEstimatedNumberOfSpots({
-          venueId: selectedVenue.id,
-          estimatedNumberOfSpots: selectedValue,
-        });
-        UPDATED_FIELDS.parkingSpots.updated = true;
-        addUpdateAction(selectedVenue, {}, null, true);
-      } catch (err) {
-        logDev('Failed to set parking lot spots:', err);
-      }
-    });
+    // Set up click handlers for parking lot space buttons
+    Flag.PlaSpaces.setupClickHandlers();
 
     // Format "no hours" section and hook up button events.
     $('#WMEPH_WLnoHours').css({ 'vertical-align': 'top' });
@@ -10514,7 +10526,7 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
     }
 
     const venueNameNoNum = selectedVenueNameRF.replace(/[^A-Z]/g, '');
-    if (((venueNameNoNum.length > 2 && !NO_NUM_SKIP.includes(venueNameNoNum)) || allowedTwoLetters.includes(venueNameNoNum)) && !selectedVenue.categories?.includes(CAT.PARKING_LOT)) {
+    if (((venueNameNoNum.length > 2 && !NO_NUM_SKIP.includes(venueNameNoNum)) || allowedTwoLetters.includes(venueNameNoNum)) && !selectedVenue.categories?.includes('PARKING_LOT')) {
       currNameList.push(venueNameNoNum);
     }
 
@@ -10525,7 +10537,7 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
           currNameList.push(aliasNameRF);
         }
         const aliasNameNoNum = aliasNameRF.replace(/[^A-Z]/g, '');
-        if (((aliasNameNoNum.length > 2 && !NO_NUM_SKIP.includes(aliasNameNoNum)) || allowedTwoLetters.includes(aliasNameNoNum)) && !selectedVenue.categories?.includes(CAT.PARKING_LOT)) {
+        if (((aliasNameNoNum.length > 2 && !NO_NUM_SKIP.includes(aliasNameNoNum)) || allowedTwoLetters.includes(aliasNameNoNum)) && !selectedVenue.categories?.includes('PARKING_LOT')) {
           currNameList.push(aliasNameNoNum);
         }
       }
@@ -10611,7 +10623,7 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
             }
 
             const testNameNoNum = strippedTestName.replace(/[^A-Z]/g, '');
-            if (((testNameNoNum.length > 2 && !NO_NUM_SKIP.includes(testNameNoNum)) || allowedTwoLetters.includes(testNameNoNum)) && !testVenue.categories?.includes(CAT.PARKING_LOT)) {
+            if (((testNameNoNum.length > 2 && !NO_NUM_SKIP.includes(testNameNoNum)) || allowedTwoLetters.includes(testNameNoNum)) && !testVenue.categories?.includes('PARKING_LOT')) {
               testNameList.push(testNameNoNum);
             }
 
@@ -10637,7 +10649,7 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
                   randInt++;
                 }
                 const aliasNameNoNum = aliasNameRF.replace(/[^A-Z]/g, '');
-                if (((aliasNameNoNum.length > 2 && !NO_NUM_SKIP.includes(aliasNameNoNum)) || allowedTwoLetters.includes(aliasNameNoNum)) && !testVenue.categories?.includes(CAT.PARKING_LOT)) {
+                if (((aliasNameNoNum.length > 2 && !NO_NUM_SKIP.includes(aliasNameNoNum)) || allowedTwoLetters.includes(aliasNameNoNum)) && !testVenue.categories?.includes('PARKING_LOT')) {
                   testNameList.push(aliasNameNoNum);
                 } else {
                   testNameList.push(`111231643239${randInt}`);
@@ -12144,9 +12156,9 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
               strokeOpacity: 0.8,
             },
           },
-          // Rule 2: Lock severity types (lock, lock1, adLock) - stroke only with dashed style
+          // Rule 2: Lock severity types (lock, lock1, adLock) - points with dashed style
           {
-            predicate: (props, zoomLevel) => props.wmephHighlight !== '1' && (props.wmephSeverity === 'lock' || props.wmephSeverity === 'lock1' || props.wmephSeverity === 'adLock'),
+            predicate: (props, zoomLevel) => props.wmephHighlight !== '1' && (props.wmephSeverity === 'lock' || props.wmephSeverity === 'lock1' || props.wmephSeverity === 'adLock') && props.isPoint === true,
             style: {
               pointRadius: '${getPointRadius}',
               graphicName: '${getGraphicName}',
@@ -12157,9 +12169,20 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
               strokeDashstyle: '${getStrokeDashstyle}'
             },
           },
-          // Rule 3: Parking lot with severity - both fill (parking type) and stroke (severity severity)
+          // Rule 2b: Lock severity types (lock, lock1, adLock) - polygons with dashed style
           {
-            predicate: (props, zoomLevel) => props.wmephHighlight !== '1' && props.parkingType !== undefined && props.wmephSeverity !== undefined,
+            predicate: (props, zoomLevel) => props.wmephHighlight !== '1' && (props.wmephSeverity === 'lock' || props.wmephSeverity === 'lock1' || props.wmephSeverity === 'adLock') && props.isPoint !== true,
+            style: {
+              fillOpacity: 0,
+              strokeColor: '${getSeverityColor}',
+              strokeWidth: 8,
+              strokeOpacity: 1,
+              strokeDashstyle: '${getStrokeDashstyle}'
+            },
+          },
+          // Rule 3: Parking lot with severity - both fill (parking type) and stroke (severity severity), excluding lock severities
+          {
+            predicate: (props, zoomLevel) => props.wmephHighlight !== '1' && props.parkingType !== undefined && props.wmephSeverity !== undefined && props.wmephSeverity !== 'lock' && props.wmephSeverity !== 'lock1' && props.wmephSeverity !== 'adLock',
             style: {
               pointRadius: '${getPointRadius}',
               graphicName: '${getGraphicName}',
@@ -12170,9 +12193,9 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
               strokeOpacity: 1,
             },
           },
-          // Rule 4: Severity only (no parking type) - stroke only
+          // Rule 4: Severity only (no parking type) - stroke only, excluding lock severities
           {
-            predicate: (props, zoomLevel) => props.wmephHighlight !== '1' && props.wmephSeverity !== undefined,
+            predicate: (props, zoomLevel) => props.wmephHighlight !== '1' && props.wmephSeverity !== undefined && props.wmephSeverity !== 'lock' && props.wmephSeverity !== 'lock1' && props.wmephSeverity !== 'adLock',
             style: {
               pointRadius: '${getPointRadius}',
               graphicName: '${getGraphicName}',
@@ -12617,6 +12640,7 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
             properties: {
               name: venue.name,
               parkingType: parkingType,
+              isPoint: venue.geometry?.type === 'Point',
               highlightType: 'parking',
               isResidential: venue.residential === true || venue.categories?.includes('RESIDENTIAL'),
             },
@@ -12668,7 +12692,7 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
         CAT.ISLAND,
         CAT.JUNCTION_INTERCHANGE,
         CAT.NATURAL_FEATURES,
-        CAT.PARKING_LOT,
+        'PARKING_LOT',
         CAT.RESIDENCE_HOME,
         CAT.RIVER_STREAM,
         CAT.SEA_LAKE_POOL,
@@ -12678,7 +12702,7 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
       ];
 
       venues.forEach((v) => {
-        // Filter: exclude venues with PARKING_FOR_CUSTOMERS service or certain categories
+        // Filter: exclude venues with PARKING_FOR_CUSTOMERS service or certain categories (including PARKING_LOT)
         if (v.services?.includes('PARKING_FOR_CUSTOMERS') || v.categories?.some((cat) => CATS_TO_IGNORE_CUSTOMER_PARKING_HIGHLIGHT.includes(cat))) {
           return;
         }
