@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        WME Place Harmonizer Beta
 // @namespace   WazeUSA
-// @version     2026.05.08.00
+// @version     2026.05.08.01
 // @description Harmonizes, formats, and locks a selected place
 // @author      WMEPH Development Group
 // @include      https://www.waze.com/editor*
@@ -40,14 +40,12 @@
   // **************************************************************************************************************
   const SHOW_UPDATE_MESSAGE = true;
   const SCRIPT_UPDATE_MESSAGE = [
-    'v 2026.05.05.00 : Fixed Convert Area to Point Place function',
-    'v 2026.05.05.01 : Fixed Entry/exit point function',
-    'v 2026.05.05.02 : Fixed Detected address fields to places with no address',
     'v 2026.05.06.00 : Fixed: Only test for missing Navagation points on PLA',
     'v 2026.05.06.01 : Fixed: Address inference: accurate distance calculation & optimized node-based search',
     'v 2026.05.06.02 : Fixed venues with Lock levels below regional standards to use strokeDashstyle',
     'v 2026.05.07.00 : Fixed: Parking lot detection & polygon dashed stroke styling for severity highlights',
     'v 2026.05.08.00 : Fixed: Indiana liquor store bug!',
+    'v 2026.05.08.01 : Fixed: Remove artificial PARKING_LOT category injection based on services',
   ];
 
   // **************************************************************************************************************
@@ -7106,12 +7104,8 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
     const colorFeaturesToAdd = [];
     venues.forEach((venue) => {
       if (venue && venue.id) {
-        // Add PARKING_LOT category if venue has parking lot services
-        if (venue.services?.some((service) => PARKING_LOT_SERVICES.includes(service))) {
-          if (!venue.categories.includes('PARKING_LOT')) {
-            venue.categories.push('PARKING_LOT');
-          }
-        }
+        // Don't artificially add PARKING_LOT category based on services
+        // Only venues that actually have PARKING_LOT as their primary category should be treated as parking lots
 
         // Highlighting logic would go here
         // Severity can be: 0, 'lock', 1, 2, 3, 4, or 'high'. Set to
