@@ -2766,6 +2766,9 @@
         }
         logDev(`Ran highlighter in ${Math.round((performance.now() - t0) * 10) / 10} milliseconds.`);
         logDev(`WMEPH cache size: ${Object.keys(_resultsCache).length}`);
+
+        applySeverityHighlights();
+        _layer.redraw();
     }
 
     // Set up CH loop
@@ -2788,6 +2791,8 @@
                 _layer.redraw();
             });
 
+            W.map.getOLMap().events.register('zoomend', null, () => errorHandler(applySeverityHighlights));
+
             // Clear the cache (highlight severities may need to be updated).
             _resultsCache = {};
 
@@ -2796,6 +2801,7 @@
             _layer.redraw();
         } else {
             // reset the colors to default
+            clearSeverityHighlights();
             applyHighlightsTest(W.model.venues.getObjectArray());
             _layer.redraw();
         }
@@ -10485,6 +10491,65 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
                 const f = new OpenLayers.Feature.Vector(geometry, { wmephHighlight: '1' }, style);
                 featuresToAdd.push(f);
             });
+        W.map.venueLayer.addFeatures(featuresToAdd);
+    }
+
+    function clearSeverityHighlights() {
+        const layer = W.map.venueLayer;
+        layer.removeFeatures(layer.getFeaturesByAttribute('wmephSeverityHighlight', '1'));
+    }
+
+    function applySeverityHighlights() {
+        clearSeverityHighlights();
+        if (!$('#WMEPH-ColorHighlighting').prop('checked')) return;
+
+        const SEVERITY_COLORS = {
+            [SEVERITY.GREEN]: '#24ff14',
+            [SEVERITY.YELLOW]: '#ffff00',
+            [SEVERITY.RED]: '#ff0000',
+            [SEVERITY.BLUE]: '#0055ff',
+            [SEVERITY.ORANGE]: '#ff8800',
+            [SEVERITY.PINK]: '#ff44aa',
+            lock: '#24ff14',
+            lock1: '#0055ff',
+        };
+
+        const strokeWidth = W.map.getZoom() >= 18 ? 16 : 8;
+
+        const featuresToAdd = [];
+        W.model.venues.getObjectArray().forEach(v => {
+            const sev = v.attributes.wmephSeverity;
+            if (sev === undefined || sev === 'default') return;
+            const strokeColor = SEVERITY_COLORS[sev];
+            if (!strokeColor) return;
+
+            const isDashed = sev === 'lock' || sev === 'lock1';
+            const style = v.isPoint()
+                ? {
+                    strokeColor,
+                    strokeWidth,
+                    strokeDashstyle: isDashed ? '7 2' : 'solid',
+                    pointRadius: 10,
+                    fillOpacity: 0,
+                    strokeOpacity: 0.85,
+                    graphicZIndex: -9999
+                }
+                : {
+                    strokeColor,
+                    strokeWidth: 8,
+                    strokeDashstyle: isDashed ? '7 2' : 'solid',
+                    fillOpacity: 0,
+                    strokeOpacity: 0.85,
+                    graphicZIndex: -9999999999
+                };
+
+            featuresToAdd.push(new OpenLayers.Feature.Vector(
+                v.getOLGeometry().clone(),
+                { wmephSeverityHighlight: '1' },
+                style
+            ));
+        });
+
         W.map.venueLayer.addFeatures(featuresToAdd);
     }
 
