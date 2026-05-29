@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name        WME Place Harmonizer Beta
+// @name        WME Place Harmonizer
 // @namespace   WazeUSA
-// @version     2026.05.29.01
+// @version     2026.05.29.02
 // @description Harmonizes, formats, and locks a selected place
 // @author      WMEPH Development Group
 // @include      https://www.waze.com/editor*
@@ -42,7 +42,7 @@
   const SCRIPT_UPDATE_MESSAGE = [
     'v 2026.05.28.00 : Fix: Make Gas Station primany category bug fixed.',
     'v 2026.05.29.00 : Fix: Prevent Nudge button from reappearing after initial click',
-    'v 2026.05.29.01 : Fix: Preserve address IDs during place copy operation',
+    'v 2026.05.29.02 : Fix: Preserve address IDs during place copy operation',
   ];
 
   // **************************************************************************************************************
