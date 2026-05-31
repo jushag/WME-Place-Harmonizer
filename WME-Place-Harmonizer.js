@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        WME Place Harmonizer
 // @namespace   WazeUSA
-// @version     2026.05.29.02
+// @version     2026.05.31.03
 // @description Harmonizes, formats, and locks a selected place
 // @author      WMEPH Development Group
 // @include      https://www.waze.com/editor*
@@ -40,9 +40,7 @@
   // **************************************************************************************************************
   const SHOW_UPDATE_MESSAGE = true;
   const SCRIPT_UPDATE_MESSAGE = [
-    'v 2026.05.28.00 : Fix: Make Gas Station primany category bug fixed.',
-    'v 2026.05.29.00 : Fix: Prevent Nudge button from reappearing after initial click',
-    'v 2026.05.29.02 : Fix: Preserve address IDs during place copy operation',
+    'v 2026.05.31.03  UI Modernization,  Dark Mode & Accessibility, Undo Improvements',
   ];
 
   // **************************************************************************************************************
@@ -106,6 +104,16 @@
   let _resultsCacheOrder = []; // Track insertion order for LRU eviction
   let _initAlreadyRun = false; // This is used to skip a couple things if already run once.  This could probably be handled better...
   let _textEntryValues = null; // Store the values entered in text boxes so they can be re-added when the banner is reassembled.
+  let _lockedVenuesThisSession = new Set(); // Track venues locked in current user action to prevent double-locking
+  let _normalizedPhoneThisSession = new Set(); // Track venues with normalized phone to prevent re-normalizing
+  let _normalizedUrlThisSession = new Set(); // Track venues with normalized URL to prevent re-normalizing
+  let _correctedHoursThisSession = new Set(); // Track venues with corrected hours (M-S split) to prevent re-correcting
+  let _correctedRestAreaNameThisSession = new Set(); // Track venues with corrected Rest Area name to prevent re-correcting
+  let _previousVenueLockRank = null; // Track lock level to detect lock-only changes (undo actions)
+  let _previousVenuePhone = null; // Track phone to detect phone-only changes (undo actions)
+  let _previousVenueUrl = null; // Track URL to detect URL-only changes (undo actions)
+  let _previousVenueHours = null; // Track hours to detect hours-only changes (undo actions)
+  let _currentlySelectedVenueId = null; // Track which venue is selected to detect venue change
 
   // lock levels are offset by one
   const LOCK_LEVEL_2 = 1;
@@ -644,324 +652,1481 @@
 
   // CSS STUFF
   const _CSS = `
+    /* ====================================================================
+       CSS Variables: Design Tokens
+       ==================================================================== */
+    :root {
+      /* Colors - Waze Palette */
+      --wmeph-primary: #0075e3;
+      --wmeph-primary-light: #0099ff;
+      --wmeph-primary-lighter: #33ccff;
+      --wmeph-success: #118742;
+      --wmeph-success-light: #1bab50;
+      --wmeph-warning: #e37400;
+      --wmeph-warning-light: #ffc400;
+      --wmeph-text-default: #3a3a3a;
+      --wmeph-text-secondary: #202124;
+      --wmeph-bg-primary: #ffffff;
+      --wmeph-bg-secondary: #f5f5f5;
+      --wmeph-bg-tertiary: #fbfbfb;
+      --wmeph-border: #8d8c8c;
+      --wmeph-border-light: #dadce0;
+      --wmeph-divider: #ccc;
+
+      /* Google Logo Colors */
+      --google-red: #ea4335;
+      --google-blue: #4285f4;
+      --google-yellow: #fbbc05;
+      --google-green: #34a853;
+
+      /* Status Colors with Background */
+      --wmeph-red-text: #b51212;
+      --wmeph-red-bg: #f0dcdc;
+      --wmeph-blue-text: #3232e6;
+      --wmeph-blue-bg: #dcdcf0;
+      --wmeph-yellow-text: #584a04;
+      --wmeph-yellow-bg: #f0f0c2;
+      --wmeph-gray-text: #3a3a3a;
+      --wmeph-gray-bg: #eeeeee;
+      --wmeph-orange-text: #754900;
+      --wmeph-orange-bg: #ffd389;
+      --wmeph-lightgray-bg: #f5f5f5;
+
+      /* Feed Warning Colors (brighter yellow for better visibility) */
+      --wmeph-feed-warning-text: #3d2f00;
+      --wmeph-feed-warning-bg: #ffeb3b;
+
+      /* Spacing Tokens - aligned with WME spacing scale */
+      --wmeph-spacing-xxxs: 2px;
+      --wmeph-spacing-xxs: 4px;
+      --wmeph-spacing-xs: 8px;
+      --wmeph-spacing-sm: 12px;
+      --wmeph-spacing-md: 16px;
+      --wmeph-spacing-lg: 24px;
+
+      /* Border Radius */
+      --wmeph-radius-sm: 4px;
+      --wmeph-radius-md: 6px;
+      --wmeph-radius-lg: 8px;
+      --wmeph-radius-pill: 14px;
+      --wmeph-radius-round: 9px;
+
+      /* Typography - aligned with WME */
+      --wmeph-font-family: "Rubik", "Waze Boing", "Waze Boing HB light", sans-serif;
+      --wmeph-font-size-xs: 9px;
+      --wmeph-font-size-sm: 12px;
+      --wmeph-font-size-base: 14px;
+      --wmeph-font-size-lg: 16px;
+
+      /* Transitions */
+      --transition-fast: all 0.2s ease;
+
+      /* Gradients */
+      --wmeph-gradient-header: linear-gradient(135deg, #0066cc, #0052a3);
+
+      /* Button Gradients */
+      --wmeph-gradient-primary: linear-gradient(to bottom, #0077dd, #0066cc);
+      --wmeph-gradient-primary-hover: linear-gradient(to bottom, #0066cc, #0055aa);
+      --wmeph-gradient-secondary: linear-gradient(to bottom, #f0f0f0, #e8e8e8);
+      --wmeph-gradient-secondary-hover: linear-gradient(to bottom, #e8e8e8, #d8d8d8);
+
+      /* Section Header Gradients */
+      --wmeph-gradient-section-header: linear-gradient(to bottom, #f8f9fa, #f0f1f3);
+      --wmeph-gradient-section-header-hover: linear-gradient(to bottom, #f0f1f3, #e8e9eb);
+
+      /* Icon Sizes */
+      --wmeph-icon-size-sm: 10px;
+      --wmeph-icon-size-md: 14px;
+      --wmeph-icon-size-lg: 18px;
+
+      /* Highlights */
+      --wmeph-highlight-color: #ffff99;
+    }
+
+    [wz-theme="dark"] {
+      --wmeph-text-default: #e8eaed;
+      --wmeph-text-secondary: #e8eaed;
+      --wmeph-bg-primary: #2c2c2c;
+      --wmeph-bg-secondary: #3a3a3a;
+      --wmeph-bg-tertiary: #202124;
+      --wmeph-border: #5f6368;
+      --wmeph-border-light: #5f6368;
+      --wmeph-divider: #5f6368;
+      --wmeph-primary-lighter: #33ccff;
+      --wmeph-gradient-header: linear-gradient(135deg, #1a73e8, #0d47a1);
+
+      /* Dark Mode Specific Backgrounds */
+      --wmeph-dark-bg-secondary: #3c4043;
+      --wmeph-dark-bg-tertiary: #202124;
+
+      /* Button Gradients - Dark Mode */
+      --wmeph-gradient-primary: linear-gradient(to bottom, #0077dd, #0066cc);
+      --wmeph-gradient-primary-hover: linear-gradient(to bottom, #0066cc, #0055aa);
+      --wmeph-gradient-secondary: linear-gradient(to bottom, #3c4043, #2c2c2c);
+      --wmeph-gradient-secondary-hover: linear-gradient(to bottom, #4a5359, #3c4043);
+
+      /* Section Header Gradients - Dark Mode */
+      --wmeph-gradient-section-header: linear-gradient(to bottom, #3c4043, #202124);
+      --wmeph-gradient-section-header-hover: linear-gradient(to bottom, #55595e, #3c4043);
+
+      /* Status Colors - Dark Mode (improved contrast) */
+      --wmeph-red-text: #ff6b6b;
+      --wmeph-red-bg: #3d1a1a;
+      --wmeph-blue-text: #5b9ef5;
+      --wmeph-blue-bg: #1a2d52;
+      --wmeph-yellow-text: #ffd54f;
+      --wmeph-yellow-bg: #4a4200;
+      --wmeph-gray-text: #bdc1c6;
+      --wmeph-gray-bg: #2c2c2c;
+      --wmeph-orange-text: #ffa726;
+      --wmeph-orange-bg: #3d2817;
+      --wmeph-lightgray-bg: #3a3a3a;
+
+      /* Feed Warning Colors */
+      --wmeph-feed-warning-text: #f9a825;
+      --wmeph-feed-warning-bg: #5a4a0a;
+    }
+
+    /* ====================================================================
+       Base & Layout
+       ==================================================================== */
     #edit-panel .venue-feature-editor {
-        overflow: initial;
+      overflow: initial;
     }
+
     #sidebar .wmeph-pane {
-        width: auto;
-        padding: 8px !important;
+      width: 100%;
+      max-width: 100%;
+      padding: var(--wmeph-spacing-xs) !important;
+      box-sizing: border-box;
+      overflow-x: hidden;
     }
+
+    /* ====================================================================
+       Banner: Main Container & Styling
+       ==================================================================== */
+    #WMEPH_banner {
+      background-color: var(--wmeph-bg-primary);
+      color: var(--wmeph-text-default);
+      font-size: var(--wmeph-font-size-base);
+      padding: var(--wmeph-spacing-xxs);
+      margin: var(--wmeph-spacing-xxs) var(--wmeph-spacing-xxs) var(--wmeph-spacing-xxs) var(--wmeph-spacing-xxs);
+      line-height: 18px;
+      border: solid 1px var(--wmeph-border);
+      border-radius: var(--wmeph-radius-md);
+    }
+
+    #WMEPH_banner input[type=text] {
+      font-size: var(--wmeph-font-size-sm) !important;
+      height: 22px !important;
+      font-family: var(--wmeph-font-family) !important;
+      max-width: 120px;
+      box-sizing: border-box;
+    }
+
+    #wmeph-hours-list div {
+      padding-bottom: 2px !important;
+      border-bottom: 1px solid var(--wmeph-divider);
+    }
+
+    #wmeph-hours-list div:last-child {
+      border-bottom: none;
+    }
+
+    /* ====================================================================
+       Banner: Buttons & Row Styling
+       ==================================================================== */
     #WMEPH_banner .wmeph-btn {
-        background-color: #fbfbfb;
-        box-shadow: 0 2px 0 #aaa;
-        border: solid 1px #bbb;
-        font-weight:normal;
-        margin-bottom: 2px;
-        margin-right:4px
+      background-color: var(--wmeph-bg-tertiary);
+      border: solid 1px var(--wmeph-border);
+      font-weight: normal;
+      padding: 3px 3px;
+      height: 22px
+      margin-bottom: var(--wmeph-spacing-xs);
+      margin-right: var(--wmeph-spacing-xs);
+      transition: var(--transition-fast);
+      cursor: pointer;
+      border-radius: var(--wmeph-radius-sm);
     }
-    .wmeph-btn, .wmephwl-btn {
-        height: 19px;
-        font-family: "Boing", sans-serif;
+
+    #WMEPH_banner .wmeph-btn:hover {
+      background-color: var(--wmeph-bg-secondary);
+      border-color: var(--wmeph-primary);
+      box-shadow: 0 1px 3px rgba(0, 119, 221, 0.2);
+      transform: translateY(-1px);
     }
+
+    #WMEPH_banner .wmeph-btn:active {
+      transform: translateY(0);
+      box-shadow: 0 1px 2px rgba(0, 119, 221, 0.1);
+    }
+
+    #WMEPH_banner .wmeph-btn:focus {
+      outline: none;
+      box-shadow: 0 0 0 2px rgba(0, 119, 221, 0.3);
+    }
+
     .btn.wmeph-btn {
-        padding: 0px 3px;
+      padding: 0 3px;
     }
-    .btn.wmephwl-btn {
-        padding: 0px 1px 0px 2px;
-        height: 18px;
-        box-shadow: 0 2px 0 #b3b3b3;
-    }
+
+    /* Whitelist button styles are scoped to #WMEPH_banner and #wmeph-run-panel (see around line 857-881) */
 
     #WMEPH_banner .banner-row {
-        padding:2px 4px;
-        cursor: default;
-    }
-    #WMEPH_banner .banner-row.red {
-        color:#b51212;
-        background-color: #f0dcdc;
-    }
-    #WMEPH_banner .banner-row.blue {
-        color:#3232e6;
-        background-color: #dcdcf0;
-    }
-    #WMEPH_banner .banner-row.yellow {
-        color:#584a04;
-        background-color: #f0f0c2;
-    }
-    #WMEPH_banner .banner-row.gray {
-        color:#3a3a3a;
-        background-color: #eeeeee;
-    }
-    #WMEPH_banner .banner-row.orange {
-        color:#754900;
-        background-color: #ffd389
-    }
-    #WMEPH_banner .banner-row.lightgray {
-        color:#3a3a3a;
-        background-color: #f5f5f5;
-    }
-    #WMEPH_banner .banner-row .dupe {
-        padding-left:8px;
-    }
-    #WMEPH_banner {
-        background-color:#fff;
-        color:black; font-size:14px;
-        padding-top:8px;
-        padding-bottom:8px;
-        margin-left:4px;
-        margin-right:4px;
-        line-height:18px;
-        margin-top:2px;
-        border: solid 1px #8d8c8c;
-        border-radius: 6px;
-        margin-bottom: 4px;
-    }
-    #WMEPH_banner input[type=text] {
-        font-size: 13px !important;
-        height:22px !important;
-        font-family: "Open Sans", Alef, helvetica, sans-serif !important;
-    }
-    #WMEPH_banner div:last-child {
-        padding-bottom: 3px !important;
-    }
-    #wmeph-run-panel {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 4px;
-        align-items: center;
-        padding: 4px;
-        color: black;
-        font-size: 14px;
-    }
-    #wmeph-run-panel .wmeph-run-btn {
-        flex: 1 0 83px;
-        min-width: 83px;
-        height: 28px;
-        padding: 4px 8px !important;
-        font-size: 12px !important;
-        border-radius: 14px;
-        border: 1px solid;
-        background-color: transparent !important;
-        box-shadow: none !important;
-    }
-    #wmeph-run-panel .wmeph-btn {
-        flex: 0 1 auto;
-        height: 28px;
-    }
-    #wmeph-run-panel .wmeph-clone-row {
-        display: flex;
-        // flex-wrap: wrap;
-        gap: 4px;
-        align-items: center;
-        // justify-content: space-around;
-        // margin-top: 4px;
-    }
-    #wmeph-run-panel .wmeph-clone-btn {
-        height: 18px !important;
-        padding: 0px 10px !important;
-        font-size: 9px !important;
-        border-radius: 9px;
-        border: 1px solid;
-        background-color: transparent !important;
-        box-shadow: none !important;
-        transition: all 0.2s ease;
-        display: flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-    }
-    #wmeph-run-panel .wmeph-clone-btn.btn-warning {
-        border-color: #e37400 !important;
-        color: #e37400 !important;
-    }
-    #wmeph-run-panel .wmeph-clone-btn.btn-warning:hover {
-        background-color: rgba(227, 116, 0, 0.1) !important;
-        border-color: #ffc400 !important;
-    }
-    #wmeph-run-panel .wmeph-clone-btn.btn-info {
-        border-color: #0099ff !important;
-        color: #0099ff !important;
-    }
-    #wmeph-run-panel .wmeph-clone-btn.btn-info:hover {
-        background-color: rgba(0, 153, 255, 0.1) !important;
-        border-color: #33ccff !important;
-    }
-    #wmeph-run-panel .wmeph-clone-row .wmeph-icon-toggle {
-        font-size: 18px !important;
-        color: #0075e3;
-    }
-    #wmeph-run-panel .wmeph-clone-row .wmeph-icon-toggle i {
-        font-size: 18px !important;
-    }
-    #wmeph-run-panel .wmeph-clone-row .wmeph-icon-toggle:hover {
-        transform: scale(1.1);
-    }
-    [wz-theme="dark"] #wmeph-run-panel .wmeph-clone-row .wmeph-icon-toggle {
-        color: #33ccff;
-    }
-    /* Waze color palette - Chip/outline style */
-    #runWMEPH {
-        border-color: #0075e3 !important;
-        color: #0075e3 !important;
-        transition: all 0.2s ease;
-    }
-    #runWMEPH:hover {
-        background-color: rgba(0, 153, 255, 0.1) !important;
-        border-color: #0099ff !important;
-    }
-    #WMEPHurl {
-        border-color: #118742 !important;
-        color: #118742 !important;
-        transition: all 0.2s ease;
-    }
-    #WMEPHurl:hover {
-        background-color: rgba(27, 171, 80, 0.1) !important;
-        border-color: #1bab50 !important;
-    }
-    #wmephSearch {
-        border-color: #0099ff !important;
-        color: #0099ff !important;
-        transition: all 0.2s ease;
-    }
-    #wmephSearch:hover {
-        background-color: rgba(51, 204, 255, 0.1) !important;
-        border-color: #33ccff !important;
-    }
-    #wmephPlugShareSearch {
-        border-color: #118742 !important;
-        color: #118742 !important;
-        transition: all 0.2s ease;
-    }
-    #wmephPlugShareSearch:hover {
-        background-color: rgba(30, 171, 146, 0.1) !important;
-        border-color: #1ee592 !important;
-    }
-    #WMEPH_tools {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 4px;
-        align-items: center;
-        padding: 4px 6px !important;
-    }
-    #WMEPH_tools > div {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 4px;
-        align-items: center;
-    }
-    #WMEPH_tools .wmeph-btn {
-        padding: 2px 6px !important;
-        margin-bottom: 0 !important;
-        margin-right: 0 !important;
-        font-size: 12px;
-        height: 18px;
-        flex-shrink: 0;
-    }
-    #WMEPH_tools .wmeph-clone-btn {
-        height: 18px !important;
-        padding: 0px 10px !important;
-        font-size: 9px !important;
-        border-radius: 9px;
-        border: 1px solid;
-        background-color: transparent !important;
-        box-shadow: none !important;
-        transition: all 0.2s ease;
-        display: flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-    }
-    #WMEPH_tools .wmeph-clone-btn.btn-info {
-        border-color: #0099ff !important;
-        color: #0099ff !important;
-    }
-    #WMEPH_tools .wmeph-clone-btn.btn-info:hover {
-        background-color: rgba(0, 153, 255, 0.1) !important;
-        border-color: #33ccff !important;
-    }
-    .wmeph-fat-btn {
-        padding-left:8px;
-        padding-right:8px;
-        padding-top:4px;
-        margin-right:3px;
-        display:inline-block;
-        font-weight:normal;
-        height:24px;
-        font-family: "Boing", sans-serif;
-    }
-    .ui-autocomplete {
-        max-height: 300px;
-        overflow-y: auto;
-        overflow-x: hidden;
-    }
-    .wmeph-hr {
-        border-color: #ccc;
-    }
-    .wmeph-hr {
-        border-color: #ccc;
+      padding: var(--wmeph-spacing-xxs) var(--wmeph-spacing-xxs);
+      cursor: default;
     }
 
+    #WMEPH_banner .banner-row:has(.wmeph-hours-row1) {
+      display: flex;
+      align-items: flex-start;
+      gap: var(--wmeph-spacing-xxs);
+    }
+
+    #WMEPH_banner .banner-row:has(.wmeph-hours-row1) > span {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      min-width: 0;
+      font-size: 0;
+      line-height: 0;
+    }
+
+    #WMEPH_banner .banner-row:has(.wmeph-hours-row1) > span > div {
+      font-size: var(--wmeph-font-size-base);
+      line-height: normal;
+    }
+
+    .wmeph-hours-row1 {
+      display: flex;
+      align-items: center;
+      gap: var(--wmeph-spacing-xxs);
+    }
+
+    .wmeph-hours-row2 {
+      display: flex;
+      align-items: center;
+      gap: var(--wmeph-spacing-xxs);
+      width: 100%;
+    }
+
+    .wmeph-hours-row2 .wmephwl-btn {
+      margin-left: auto;
+    }
+
+    .wmeph-hours-row3 {
+      /*width: auto;*/
+      /*min-width: 253px;*/
+      margin-left: 0;
+    }
+
+    #WMEPH_banner .banner-row.red {
+      color: var(--wmeph-red-text);
+      background-color: var(--wmeph-red-bg);
+    }
+
+    #WMEPH_banner .banner-row.blue {
+      color: var(--wmeph-blue-text);
+      background-color: var(--wmeph-blue-bg);
+    }
+
+    #WMEPH_banner .banner-row.yellow {
+      color: var(--wmeph-yellow-text);
+      background-color: var(--wmeph-yellow-bg);
+    }
+
+    /* Feed warning banner */
+    .wmeph-feed-warning {
+      padding: var(--wmeph-spacing-xxxs) var(--wmeph-spacing-xxs) 0 var(--wmeph-spacing-xxs);
+      background-color: var(--wmeph-feed-warning-bg);
+      color: var(--wmeph-feed-warning-text);
+    }
+
+    .wmeph-feed-warning-title {
+      font-weight: 500;
+      color: var(--wmeph-feed-warning-text);
+    }
+
+    .wmeph-feed-warning-desc {
+      font-size: var(--wmeph-font-size-sm);
+      color: var(--wmeph-feed-warning-text);
+    }
+
+    .wmeph-feed-warning-list {
+      font-size: var(--wmeph-font-size-sm);
+      color: var(--wmeph-feed-warning-text);
+    }
+
+    #WMEPH_banner .banner-row.gray {
+      color: var(--wmeph-gray-text);
+      background-color: var(--wmeph-gray-bg);
+    }
+
+    #WMEPH_banner .banner-row.orange {
+      color: var(--wmeph-orange-text);
+      background-color: var(--wmeph-orange-bg);
+    }
+
+    #WMEPH_banner .banner-row.lightgray {
+      color: var(--wmeph-gray-text);
+      background-color: var(--wmeph-lightgray-bg);
+    }
+
+    #WMEPH_banner .banner-row .dupe {
+      padding-left: var(--wmeph-spacing-sm);
+    }
+
+    /* ====================================================================
+       Run Panel: Primary Action Container
+       ==================================================================== */
+    #wmeph-run-panel {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--wmeph-spacing-xxs);
+      align-items: center;
+      padding: var(--wmeph-spacing-xxs);
+      color: var(--wmeph-text-default);
+      font-size: var(--wmeph-font-size-base);
+    }
+
+    #wmeph-run-panel .wmeph-run-btn {
+      flex: 1 0 83px;
+      min-width: 83px;
+      height: 28px;
+      padding: var(--wmeph-spacing-xxs) var(--wmeph-spacing-xxs) var(--wmeph-spacing-xxs) var(--wmeph-spacing-xxs) !important;
+      font-size: var(--wmeph-font-size-sm) !important;
+      border-radius: var(--wmeph-radius-pill);
+      border: 1px solid;
+      background-color: transparent !important;
+      box-shadow: none !important;
+      transition: var(--transition-fast);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    #wmeph-run-panel .wmeph-btn {
+      flex: 0 1 auto;
+      height: 28px;
+    }
+
+    /* ====================================================================
+       Whitelist Buttons: Success-Styled Actions
+       ==================================================================== */
+    #WMEPH_banner .wmephwl-btn {
+      background-color: var(--wmeph-success, #118742);
+      border: solid 1px var(--wmeph-success, #118742);
+      color: white;
+      font-weight: normal;
+      margin-bottom: 0;
+      margin-right: 0;
+      transition: var(--transition-fast);
+      cursor: pointer;
+      padding: 2px 2px;
+      height: 22px;
+      flex-shrink: 0;
+    }
+
+    #WMEPH_banner .wmephwl-btn:hover {
+      opacity: 0.85;
+      transform: translateY(-1px);
+    }
+
+    #wmeph-run-panel .wmephwl-btn {
+      background-color: var(--wmeph-success, #118742);
+      border: solid 1px var(--wmeph-success, #118742);
+      color: white;
+      padding: 2px 8px;
+      margin-right: var(--wmeph-spacing-xs);
+      transition: var(--transition-fast);
+      cursor: pointer;
+    }
+
+    #wmeph-run-panel .wmeph-clone-row {
+      display: flex;
+      gap: var(--wmeph-spacing-xs);
+      align-items: center;
+    }
+
+    /* ====================================================================
+       Clone Buttons: Compact Icon Buttons
+       ==================================================================== */
+    #wmeph-run-panel .wmeph-clone-btn {
+      height: 18px !important;
+      padding: 0 10px !important;
+      font-size: var(--wmeph-font-size-xs) !important;
+      border-radius: var(--wmeph-radius-round);
+      border: 1px solid;
+      background-color: transparent !important;
+      box-shadow: none !important;
+      transition: var(--transition-fast);
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+    }
+
+    #wmeph-run-panel .wmeph-clone-btn.btn-warning {
+      border-color: var(--wmeph-warning) !important;
+      color: var(--wmeph-warning) !important;
+    }
+
+    #wmeph-run-panel .wmeph-clone-btn.btn-warning:hover {
+      background-color: rgba(227, 116, 0, 0.1) !important;
+      border-color: var(--wmeph-warning-light) !important;
+    }
+
+    #wmeph-run-panel .wmeph-clone-btn.btn-info {
+      border-color: var(--wmeph-primary-light) !important;
+      color: var(--wmeph-primary-light) !important;
+    }
+
+    #wmeph-run-panel .wmeph-clone-btn.btn-info:hover {
+      background-color: rgba(0, 153, 255, 0.1) !important;
+      border-color: var(--wmeph-primary-lighter) !important;
+    }
+
+    /* ====================================================================
+       Icon Toggle in Clone Row
+       ==================================================================== */
+    #wmeph-run-panel .wmeph-clone-row .wmeph-icon-toggle {
+      font-size: 18px !important;
+      color: var(--wmeph-primary);
+      transition: var(--transition-fast);
+      cursor: pointer;
+    }
+
+    #wmeph-run-panel .wmeph-clone-row .wmeph-icon-toggle i {
+      font-size: 18px !important;
+    }
+
+    #wmeph-run-panel .wmeph-clone-row .wmeph-icon-toggle:hover {
+      transform: scale(1.1);
+    }
+
+    [wz-theme="dark"] #wmeph-run-panel .wmeph-clone-row .wmeph-icon-toggle {
+      color: var(--wmeph-primary-lighter);
+    }
+
+    /* ====================================================================
+       Action Buttons: Semantic Color System
+       ==================================================================== */
+    #runWMEPH {
+      border-color: var(--wmeph-primary) !important;
+      color: var(--wmeph-primary) !important;
+      transition: var(--transition-fast);
+    }
+
+    #runWMEPH:hover {
+      background-color: rgba(0, 117, 227, 0.1) !important;
+      border-color: var(--wmeph-primary-light) !important;
+    }
+
+    #WMEPHurl {
+      border-color: var(--wmeph-success) !important;
+      color: var(--wmeph-success) !important;
+      transition: var(--transition-fast);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    #WMEPHurl:hover {
+      background-color: rgba(27, 171, 80, 0.1) !important;
+      border-color: var(--wmeph-success-light) !important;
+    }
+
+    #wmephSearch {
+      border-color: var(--wmeph-primary-light) !important;
+      color: var(--wmeph-primary-light) !important;
+      transition: var(--transition-fast);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    #wmephSearch:hover {
+      background-color: rgba(0, 153, 255, 0.1) !important;
+      border-color: var(--wmeph-primary-lighter) !important;
+    }
+
+    #wmephPlugShareSearch {
+      border-color: var(--wmeph-success) !important;
+      color: var(--wmeph-success) !important;
+      transition: var(--transition-fast);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    #wmephPlugShareSearch:hover {
+      background-color: rgba(30, 171, 146, 0.1) !important;
+      border-color: var(--wmeph-success-light, #1bab50) !important;
+    }
+
+    /* ====================================================================
+       Tools Panel: Secondary Actions
+       ==================================================================== */
+    #WMEPH_tools {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--wmeph-spacing-xs);
+      align-items: center;
+      padding: var(--wmeph-spacing-xs) 6px !important;
+    }
+
+    #WMEPH_tools > div {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--wmeph-spacing-xs);
+      align-items: center;
+    }
+
+    #WMEPH_tools .wmeph-btn {
+      padding: 2px 6px !important;
+      margin-bottom: 0 !important;
+      margin-right: 0 !important;
+      font-size: var(--wmeph-font-size-sm);
+      height: 18px;
+      flex-shrink: 0;
+    }
+
+    #WMEPH_tools .wmeph-clone-btn {
+      height: 18px !important;
+      padding: 0 10px !important;
+      font-size: var(--wmeph-font-size-xs) !important;
+      border-radius: var(--wmeph-radius-round);
+      border: 1px solid;
+      background-color: transparent !important;
+      box-shadow: none !important;
+      transition: var(--transition-fast);
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+    }
+
+    #WMEPH_tools .wmeph-clone-btn.btn-info {
+      border-color: var(--wmeph-primary-light) !important;
+      color: var(--wmeph-primary-light) !important;
+    }
+
+    #WMEPH_tools .wmeph-clone-btn.btn-info:hover {
+      background-color: rgba(0, 153, 255, 0.1) !important;
+      border-color: var(--wmeph-primary-lighter) !important;
+    }
+
+    /* ====================================================================
+       Fat Buttons & Utility Styles
+       ==================================================================== */
+    .wmeph-fat-btn {
+      padding: var(--wmeph-spacing-xs) var(--wmeph-spacing-sm);
+      margin-right: 3px;
+      display: inline-block;
+      font-weight: normal;
+      height: 24px;
+      font-family: var(--wmeph-font-family);
+      transition: var(--transition-fast);
+    }
+
+    .ui-autocomplete {
+      max-height: 300px;
+      overflow-y: auto;
+      overflow-x: hidden;
+    }
+
+    .wmeph-hr {
+      border-color: var(--wmeph-divider);
+    }
+
+    /* ====================================================================
+       Animations & Highlights
+       ==================================================================== */
     @keyframes highlight {
-        0% {
-            background: #ffff99;
-        }
-        100% {
-            background: none;
-        }
+      0% {
+        background: var(--wmeph-highlight-color);
+      }
+      100% {
+        background: none;
+      }
     }
 
     .highlight {
-        animation: highlight 1.5s;
+      animation: highlight 1.5s;
     }
 
+    /* ====================================================================
+       Google Logo Colors
+       ==================================================================== */
     .google-logo {
-        /*font-size: 16px*/
-    }
-    .google-logo.red{
-        color: #ea4335
-    }
-    .google-logo.blue {
-        color: #4285f4
-    }
-    .google-logo.orange {
-        color: #fbbc05
-    }
-    .google-logo.green {
-        color: #34a853
+      font-size: 12px;
     }
 
-    /* WMEPH Section Wrapper - Phase 1 Incremental */
-    .wmeph-section {
-        background-color: #fff;
-        border: solid 1px #8d8c8c;
-        border-radius: 6px;
-        margin: 2px 4px 4px 4px;
+    .google-logo.red {
+      color: var(--google-red);
     }
-    [wz-theme="dark"] .wmeph-section {
-        background-color: #2c2c2c;
-        border-color: #5f6368;
+
+    .google-logo.blue {
+      color: var(--google-blue);
+    }
+
+    .google-logo.orange {
+      color: var(--google-yellow);
+    }
+
+    .google-logo.green {
+      color: var(--google-green);
+    }
+
+    .google-logo.gray {
+      color: var(--wmeph-gray-text);
+    }
+
+    /* ====================================================================
+       Section Components: Cards & Headers
+       ==================================================================== */
+    .wmeph-section {
+      background-color: var(--wmeph-bg-primary);
+      border: solid 1px var(--wmeph-border);
+      /* border-radius: var(--wmeph-radius-md); */
+      margin: var(--wmeph-spacing-xxxs) var(--wmeph-spacing-xxxs) var(--wmeph-spacing-xxxs) var(--wmeph-spacing-xxxs);
     }
 
     .wmeph-section-header {
-        display: flex;
-        align-items: center;
-        background: linear-gradient(to right, #f5f5f5 0%, #ffffff 100%);
-        border-bottom: 1px solid #dadce0;
-        padding: 2px 2px;
-        font-weight: 600;
-        font-size: 14px;
-        color: #202124;
-        cursor: default;
-        user-select: none;
-    }
-    [wz-theme="dark"] .wmeph-section-header {
-        background: linear-gradient(to right, #3a3a3a 0%, #2c2c2c 100%);
-        border-bottom-color: #5f6368;
-        color: #e8eaed;
+      display: flex;
+      align-items: center;
+      background: linear-gradient(to right, var(--wmeph-bg-secondary) 0%, var(--wmeph-bg-primary) 100%);
+      border-bottom: 1px solid var(--wmeph-border-light);
+      padding: 2px;
+      font-weight: 600;
+      font-size: var(--wmeph-font-size-base);
+      color: var(--wmeph-text-secondary);
+      cursor: default;
+      user-select: none;
+      transition: var(--transition-fast);
     }
 
     .wmeph-section-body {
-        padding: 4px 0;
+      padding: var(--wmeph-spacing-xs) 0;
+    }
+
+    /* ====================================================================
+       Scoped Component Classes
+       ==================================================================== */
+    .wmeph-header {
+      background: var(--wmeph-gradient-header);
+      padding: var(--wmeph-spacing-md);
+      border-radius: var(--wmeph-radius-lg);
+      margin-bottom: var(--wmeph-spacing-md);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: white;
+    }
+
+    .wmeph-card {
+      background: var(--wmeph-bg-primary);
+      border: 1px solid var(--wmeph-border-light);
+      border-radius: var(--wmeph-radius-md);
+      padding: var(--wmeph-spacing-md);
+      margin-bottom: var(--wmeph-spacing-md);
+    }
+
+    .wmeph-card-header {
+      display: flex;
+      align-items: center;
+      gap: var(--wmeph-spacing-sm);
+      margin-bottom: var(--wmeph-spacing-md);
+      padding-bottom: var(--wmeph-spacing-sm);
+      border-bottom: 1px solid var(--wmeph-border-light);
+    }
+
+    .wmeph-row {
+      display: flex;
+      align-items: center;
+      gap: var(--wmeph-spacing-sm);
+      margin-bottom: var(--wmeph-spacing-xs);
+    }
+
+    .wmeph-row:last-child {
+      margin-bottom: 0;
+    }
+
+    .wmeph-pane .wmeph-checkbox {
+      width: var(--wmeph-spacing-md);
+      height: var(--wmeph-spacing-md);
+      cursor: pointer;
+      accent-color: var(--wmeph-primary);
+      flex-shrink: 0;
+    }
+
+    .wmeph-pane .wmeph-checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: var(--wmeph-spacing-xs);
+      margin-bottom: var(--wmeph-spacing-xs);
+    }
+
+    .wmeph-pane .wmeph-checkbox-row:last-child {
+      margin-bottom: 0;
+    }
+
+    .wmeph-pane .wmeph-checkbox-label {
+      font-size: var(--wmeph-font-size-sm);
+      color: var(--wmeph-text-secondary);
+      cursor: pointer;
+      user-select: none;
+      margin: 0;
+      font-weight: 300;
+    }
+
+    /* Dark Mode Checkboxes */
+    [wz-theme="dark"] .wmeph-pane .wmeph-checkbox-label {
+      color: var(--wmeph-text-secondary);
+    }
+
+    .wmeph-input {
+      padding: var(--wmeph-spacing-xxxs) var(--wmeph-spacing-xxxs);
+      font-size: var(--wmeph-font-size-sm);
+      border: 1px solid var(--wmeph-border);
+      border-radius: var(--wmeph-radius-sm);
+      background: var(--wmeph-bg-primary);
+      color: var(--wmeph-text-default);
+      box-sizing: border-box;
+    }
+
+    .wmeph-input:focus {
+      outline: none;
+      border-color: var(--wmeph-primary);
+      box-shadow: 0 0 0 3px rgba(0, 117, 227, 0.1);
+    }
+
+    #wmeph-paste-hours-btn {
+      font-size: var(--wmeph-font-size-lg);
+      position: relative;
+      vertical-align: top;
+      top: var(--wmeph-spacing-xxxs);
+      right: -5px;
+      margin-right: var(--wmeph-spacing-xxs);
+      color: var(--wmeph-text-secondary, #6c6c6c);
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    #wmeph-hours-list {
+      display: block;
+      font-size: var(--wmeph-font-size-sm) !important;
+      line-height: normal !important;
+      border: 1px solid var(--wmeph-border);
+      background-color: var(--wmeph-bg-secondary);
+      color: var(--wmeph-text-secondary);
+      padding: 1px 0px 0 3px !important;
+      position: relative;
+      z-index: 1;
+      width: 269px !important;
+      /*min-width: 253px !important;*/
+      /*max-width: 253px !important;*/
+      box-sizing: border-box;
+    }
+
+    #WMEPH-HoursPaste {
+      overflow: auto;
+      flex: 1 1 230px;
+      max-width: 230px;
+      min-width: 80px;
+      height: var(--wmeph-spacing-lg);
+      min-height: var(--wmeph-spacing-lg);
+      max-height: 200px;
+      margin-bottom: -2px;
+      margin-top: var(--wmeph-spacing-xxxs);
+      padding-left: 3px;
+      position: relative;
+      z-index: 1;
+      color: var(--wmeph-text-secondary, #AAA);
+    }
+
+    .wmeph-badge {
+      display: inline-block;
+      padding: var(--wmeph-spacing-xxxs) 6px;
+      font-size: var(--wmeph-font-size-xs);
+      font-weight: 600;
+      border-radius: var(--wmeph-radius-sm);
+      background: var(--wmeph-primary);
+      color: white;
+      white-space: nowrap;
+    }
+
+    .wmeph-badge.secondary {
+      background: var(--wmeph-bg-secondary);
+      color: var(--wmeph-text-default);
+      border: 1px solid var(--wmeph-border);
+    }
+
+    .wmeph-pane-tabs {
+      display: flex;
+      gap: var(--wmeph-spacing-xs);
+      margin-bottom: var(--wmeph-spacing-md);
+      border-bottom: 2px solid var(--wmeph-border-light);
+    }
+
+    .wmeph-pane-tab {
+      padding: var(--wmeph-spacing-sm) var(--wmeph-spacing-md);
+      font-size: var(--wmeph-font-size-sm);
+      font-weight: 600;
+      cursor: pointer;
+      border-bottom: 3px solid transparent;
+      color: var(--wmeph-text-secondary);
+      background: none;
+      transition: var(--transition-fast);
+    }
+
+    .wmeph-pane-tab.active {
+      color: var(--wmeph-primary);
+      border-bottom-color: var(--wmeph-primary);
+    }
+
+    .wmeph-pane-tab:hover {
+      color: var(--wmeph-text-default);
+    }
+
+    .wmeph-card-title {
+      margin: 0;
+      font-size: var(--wmeph-font-size-base);
+      font-weight: 600;
+      color: var(--wmeph-text-default);
+    }
+
+    .wmeph-card-body {
+      display: flex;
+      flex-direction: column;
+      gap: var(--wmeph-spacing-sm);
+    }
+
+    .wmeph-label {
+      font-size: var(--wmeph-font-size-sm);
+      color: var(--wmeph-text-secondary);
+      font-weight: 500;
+      flex-shrink: 0;
+    }
+
+    .wmeph-select {
+      padding: 4px 6px;
+      font-size: var(--wmeph-font-size-sm);
+      border: 1px solid var(--wmeph-border);
+      border-radius: var(--wmeph-radius-sm);
+      background: var(--wmeph-bg-primary);
+      color: var(--wmeph-text-default);
+      box-sizing: border-box;
+    }
+
+    .wmeph-select:focus {
+      outline: none;
+      border-color: var(--wmeph-primary);
+      box-shadow: 0 0 0 3px rgba(0, 117, 227, 0.1);
+    }
+
+    .wmeph-btn {
+      padding: 4px 8px;
+      font-size: var(--wmeph-font-size-sm);
+      border: 1px solid var(--wmeph-border);
+      background: var(--wmeph-bg-secondary);
+      color: var(--wmeph-text-default);
+      border-radius: var(--wmeph-radius-sm);
+      cursor: pointer;
+      transition: var(--transition-fast);
+    }
+
+    .wmeph-btn:hover {
+      background: var(--wmeph-bg-tertiary);
+      border-color: var(--wmeph-primary);
+    }
+
+    .wmeph-btn.secondary {
+      background: var(--wmeph-bg-secondary);
+      color: var(--wmeph-text-default);
+      border: 1px solid var(--wmeph-border);
+    }
+
+    .wmeph-btn.secondary:hover:not(:disabled) {
+      background: var(--wmeph-border-light);
+      border-color: var(--wmeph-primary);
+    }
+
+    /* Icon toggle button styling */
+    .wmeph-icon-toggle {
+      background: none;
+      border: none;
+      padding: 4px 6px;
+      cursor: pointer;
+      font-size: 16px;
+      color: var(--wmeph-text-secondary, #999);
+      transition: var(--transition-fast);
+      opacity: 0.5;
+    }
+
+    .wmeph-icon-toggle.checked {
+      color: var(--wmeph-primary, #0075e3);
+      opacity: 1;
+    }
+
+    .wmeph-tab-content {
+      display: none;
+    }
+
+    .wmeph-tab-content.active {
+      display: block;
+      animation: fadeIn 0.2s ease-in;
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+      }
+      to {
+        opacity: 1;
+      }
+    }
+
+    /* Bootstrap Nav Tabs Styling */
+    .wmeph-pane .wmeph-internal-tabs {
+      border-bottom: 2px solid var(--wmeph-border-light);
+      margin-bottom: 0;
+    }
+
+    .wmeph-pane .wmeph-internal-tabs .nav-link {
+      color: var(--wmeph-text-secondary) !important;
+      font-size: var(--wmeph-font-size-sm);
+      font-weight: 600;
+      padding: var(--wmeph-spacing-xs) var(--wmeph-spacing-sm);
+      border: none !important;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+      transition: all 0.2s;
+      position: relative;
+      background: transparent !important;
+    }
+
+    .wmeph-pane .wmeph-internal-tabs .nav-link:hover {
+      color: var(--wmeph-primary) !important;
+      background: transparent !important;
+    }
+
+    .wmeph-pane .wmeph-internal-tabs .nav-link.active,
+    .wmeph-pane .wmeph-internal-tabs .nav-link.active:hover,
+    .wmeph-pane .wmeph-internal-tabs .nav-link.active:focus {
+      color: white !important;
+      background: var(--wmeph-primary) !important;
+      border-radius: 4px 4px 0 0 !important;
+      font-weight: 700 !important;
+    }
+
+    /* Tab Content */
+    .wmeph-pane .tab-content {
+      width: 100%;
+      max-width: 100%;
+      background: var(--wmeph-bg-primary);
+      border-radius: 0 0 4px 4px;
+      /*border: 1px solid var(--wmeph-border-light);*/
+      border-top: none;
+      padding: var(--wmeph-spacing-xs);
+      box-sizing: border-box;
+      overflow: hidden;
+    }
+
+    .wmeph-pane .tab-pane {
+      display: none;
+      width: 100%;
+      max-width: 100%;
+      box-sizing: border-box;
+      overflow-x: hidden;
+    }
+
+    .wmeph-pane .tab-pane.active {
+      display: block;
+    }
+
+    /* Dark Mode Tabs */
+    [wz-theme="dark"] .wmeph-pane .wmeph-internal-tabs {
+      border-bottom-color: #55595e;
+    }
+
+    [wz-theme="dark"] .wmeph-pane .wmeph-internal-tabs .nav-link {
+      color: #b7babf !important;
+      background: transparent !important;
+    }
+
+    [wz-theme="dark"] .wmeph-pane .wmeph-internal-tabs .nav-link:hover {
+      color: #33ccff !important;
+      background: transparent !important;
+    }
+
+    [wz-theme="dark"] .wmeph-pane .wmeph-internal-tabs .nav-link.active,
+    [wz-theme="dark"] .wmeph-pane .wmeph-internal-tabs .nav-link.active:hover,
+    [wz-theme="dark"] .wmeph-pane .wmeph-internal-tabs .nav-link.active:focus {
+      background: var(--wmeph-primary) !important;
+      color: white !important;
+    }
+
+    [wz-theme="dark"] .wmeph-pane .tab-content {
+      background: var(--wmeph-dark-bg-tertiary);
+      border-color: var(--wmeph-border-light);
+    }
+
+    .wmeph-mods-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+
+    .wmeph-mods-table-cell {
+      border: 1px solid var(--wmeph-border-light);
+      padding: 6px 8px;
+    }
+
+    .wmeph-mods-table-cell.title {
+      font-weight: 600;
+      background: var(--wmeph-bg-secondary);
+    }
+
+    /* ====================================================================
+       Collapsible Settings Sections - GIS-Layers Pattern
+       ==================================================================== */
+    .wmeph-pane .settings-section {
+      width: 100%;
+      background: var(--wmeph-bg-tertiary);
+      border: 1px solid var(--wmeph-border-light);
+      border-radius: var(--wmeph-radius-md);
+      margin-bottom: var(--wmeph-spacing-md);
+      overflow: hidden;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+      transition: box-shadow 0.2s;
+      box-sizing: border-box;
+    }
+
+    .wmeph-pane .settings-section:hover {
+      box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+    }
+
+    .wmeph-pane .settings-section-header {
+      padding: var(--wmeph-spacing-xs);
+      background: var(--wmeph-gradient-section-header);
+      border-bottom: 1px solid var(--wmeph-border-light);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      user-select: none;
+      box-sizing: border-box;
+    }
+
+    .wmeph-pane .settings-section-header:hover {
+      background: var(--wmeph-gradient-section-header-hover);
+    }
+
+    .wmeph-pane .settings-section-title {
+      display: flex;
+      align-items: center;
+      gap: var(--wmeph-spacing-xs);
+      font-size: var(--wmeph-font-size-sm);
+      font-weight: 700;
+      color: var(--wmeph-text-default);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .wmeph-pane .settings-section-title i {
+      color: var(--wmeph-primary);
+      font-size: var(--wmeph-icon-size-md);
+    }
+
+    .wmeph-pane .section-toggle-icon {
+      font-size: var(--wmeph-icon-size-sm);
+      color: var(--wmeph-text-secondary);
+      transition: transform 0.2s;
+    }
+
+    .wmeph-pane .settings-section.collapsed .section-toggle-icon {
+      transform: rotate(-90deg);
+    }
+
+    .wmeph-pane .settings-section-body {
+      padding: var(--wmeph-spacing-xs);
+      background: var(--wmeph-bg-primary);
+      box-sizing: border-box;
+    }
+
+    .wmeph-pane .settings-section.collapsed .settings-section-body {
+      display: none;
+    }
+
+    /* Setting Item Block */
+    .wmeph-pane .setting-item-block {
+      margin-bottom: 14px;
+    }
+
+    .wmeph-pane .setting-item-block:last-child {
+      margin-bottom: 0;
+    }
+
+    .wmeph-pane .setting-label {
+      display: block;
+      font-size: 11px;
+      font-weight: 600;
+      color: #333;
+      margin-bottom: 6px;
+    }
+
+    /* ====================================================================
+       Pill-Style Radio Buttons
+       ==================================================================== */
+    .wmeph-pane .pill-group {
+      display: flex;
+      background: var(--wmeph-bg-secondary);
+      border-radius: var(--wmeph-radius-md);
+      padding: var(--wmeph-spacing-xxxs);
+      gap: var(--wmeph-spacing-xxxs);
+    }
+
+    .wmeph-pane .pill-option {
+      flex: 1;
+      position: relative;
+    }
+
+    .wmeph-pane .pill-option input[type="radio"] {
+      position: absolute;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .wmeph-pane .pill-option label {
+      display: block;
+      text-align: center;
+      padding: 6px 8px;
+      font-size: var(--wmeph-font-size-xs);
+      font-weight: 600;
+      color: var(--wmeph-text-secondary);
+      background: transparent;
+      border-radius: var(--wmeph-radius-sm);
+      cursor: pointer;
+      transition: all 0.2s;
+      margin: 0;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+
+    .wmeph-pane .pill-option input[type="radio"]:checked + label {
+      background: var(--wmeph-primary);
+      color: white;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      font-weight: 700;
+    }
+
+    .wmeph-pane .pill-option label:hover {
+      color: var(--wmeph-primary);
+    }
+
+    .wmeph-pane .pill-option input[type="radio"]:checked + label:hover {
+      background: var(--wmeph-primary-light);
+      color: white;
+    }
+
+    /* ====================================================================
+       Form Controls
+       ==================================================================== */
+    .wmeph-pane .setting-select {
+      width: 100%;
+      padding: 6px 8px;
+      border: 1px solid var(--wmeph-border-light);
+      border-radius: var(--wmeph-radius-sm);
+      font-size: var(--wmeph-font-size-sm);
+      background: var(--wmeph-bg-primary);
+      color: var(--wmeph-text-default);
+      cursor: pointer;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    .wmeph-pane .setting-select:focus {
+      outline: none;
+      border-color: var(--wmeph-primary);
+      box-shadow: 0 0 0 3px rgba(0, 117, 227, 0.1);
+    }
+
+    .wmeph-pane .setting-input {
+      width: 80px;
+      padding: 6px 8px;
+      border: 1px solid var(--wmeph-border-light);
+      border-radius: var(--wmeph-radius-sm);
+      font-size: var(--wmeph-font-size-sm);
+      background: var(--wmeph-bg-primary);
+      color: var(--wmeph-text-default);
+      text-align: center;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    .wmeph-pane .setting-input:focus {
+      outline: none;
+      border-color: var(--wmeph-primary);
+      box-shadow: 0 0 0 3px rgba(0, 117, 227, 0.1);
+    }
+
+    .wmeph-pane .setting-input-full {
+      width: 100%;
+      padding: 6px 8px;
+      border: 1px solid var(--wmeph-border-light);
+      border-radius: var(--wmeph-radius-sm);
+      font-size: var(--wmeph-font-size-sm);
+      background: var(--wmeph-bg-primary);
+      color: var(--wmeph-text-default);
+      margin-bottom: var(--wmeph-spacing-xs);
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    .wmeph-pane .setting-input-full:focus {
+      outline: none;
+      border-color: var(--wmeph-primary);
+      box-shadow: 0 0 0 3px rgba(0, 117, 227, 0.1);
+    }
+
+    .wmeph-pane .setting-unit {
+      font-size: 11px;
+      color: #999;
+      margin-left: 6px;
+      font-weight: 600;
+    }
+
+    .wmeph-pane .help-text {
+      font-size: var(--wmeph-icon-size-sm);
+      color: var(--wmeph-text-secondary);
+      margin-top: var(--wmeph-spacing-xxxs);
+    }
+
+    /* Button Styles */
+    .wmeph-pane .btn-primary-modern,
+    .wmeph-pane .btn-secondary-modern {
+      flex: 1;
+      padding: var(--wmeph-spacing-xs) var(--wmeph-spacing-sm);
+      border: none;
+      border-radius: var(--wmeph-radius-md);
+      font-size: var(--wmeph-font-size-xs);
+      font-weight: 700;
+      cursor: pointer;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      transition: all 0.2s;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+
+    .wmeph-pane .btn-primary-modern {
+      background: var(--wmeph-gradient-primary);
+      color: white;
+    }
+
+    .wmeph-pane .btn-primary-modern:hover {
+      background: var(--wmeph-gradient-primary-hover);
+      box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+      transform: translateY(-1px);
+    }
+
+    .wmeph-pane .btn-primary-modern:active {
+      transform: translateY(0);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+    }
+
+    .wmeph-pane .btn-primary-modern:focus {
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(0, 119, 221, 0.3);
+    }
+
+    .wmeph-pane .btn-secondary-modern {
+      background: var(--wmeph-gradient-secondary);
+      color: var(--wmeph-text-default);
+    }
+
+    .wmeph-pane .btn-secondary-modern:hover {
+      background: var(--wmeph-gradient-secondary-hover);
+      box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+      transform: translateY(-1px);
+    }
+
+    .wmeph-pane .btn-secondary-modern:focus {
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(51, 51, 51, 0.2);
+    }
+
+    .wmeph-pane .button-group,
+    .wmeph-button-group {
+      display: flex;
+      gap: 6px;
+    }
+
+    .wmeph-pane .wmeph-button-group .btn-primary-modern,
+    .wmeph-pane .wmeph-button-group .btn-secondary-modern {
+      flex: 1;
+      padding: var(--wmeph-spacing-xs) var(--wmeph-spacing-sm);
+      border: none;
+      border-radius: var(--wmeph-radius-md);
+      font-size: var(--wmeph-font-size-sm);
+      font-weight: 700;
+      cursor: pointer;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      transition: all 0.2s;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+
+    .wmeph-pane .wmeph-button-group .btn-primary-modern {
+      background: var(--wmeph-gradient-primary);
+      color: white;
+    }
+
+    .wmeph-pane .wmeph-button-group .btn-primary-modern:hover {
+      background: var(--wmeph-gradient-primary-hover);
+      box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+      transform: translateY(-1px);
+    }
+
+    .wmeph-pane .wmeph-button-group .btn-primary-modern:active {
+      transform: translateY(0);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+    }
+
+    .wmeph-pane .wmeph-button-group .btn-secondary-modern {
+      background: var(--wmeph-gradient-secondary);
+      color: var(--wmeph-text-default);
+    }
+
+    .wmeph-pane .wmeph-button-group .btn-secondary-modern:hover {
+      background: var(--wmeph-gradient-secondary-hover);
+      box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+      transform: translateY(-1px);
+    }
+
+    /* ====================================================================
+       Dark Mode - Collapsible Sections and Controls
+       ==================================================================== */
+    [wz-theme="dark"] .wmeph-pane .settings-section {
+      background: var(--wmeph-dark-bg-secondary);
+      border-color: var(--wmeph-border-light);
+    }
+
+    [wz-theme="dark"] .wmeph-pane .settings-section-header {
+      background: var(--wmeph-gradient-section-header);
+      border-bottom-color: var(--wmeph-border-light);
+    }
+
+    [wz-theme="dark"] .wmeph-pane .settings-section-header:hover {
+      background: var(--wmeph-gradient-section-header-hover);
+    }
+
+    [wz-theme="dark"] .wmeph-pane .settings-section-title {
+      color: var(--wmeph-text-default);
+    }
+
+    [wz-theme="dark"] .wmeph-pane .settings-section-body {
+      background: var(--wmeph-dark-bg-tertiary);
+    }
+
+    [wz-theme="dark"] .wmeph-pane .setting-label {
+      color: var(--wmeph-text-default);
+    }
+
+    [wz-theme="dark"] .wmeph-pane .pill-group {
+      background: var(--wmeph-dark-bg-secondary);
+    }
+
+    [wz-theme="dark"] .wmeph-pane .pill-option label {
+      color: var(--wmeph-text-secondary);
+    }
+
+    [wz-theme="dark"] .wmeph-pane .pill-option input[type="radio"]:checked + label {
+      background: var(--wmeph-primary-light);
+      color: white;
+    }
+
+    [wz-theme="dark"] .wmeph-pane .pill-option label:hover {
+      color: var(--wmeph-primary-lighter);
+    }
+
+    [wz-theme="dark"] .wmeph-pane .pill-option input[type="radio"]:checked + label:hover {
+      background: var(--wmeph-primary);
+      color: white;
+    }
+
+    [wz-theme="dark"] .wmeph-pane .setting-select,
+    [wz-theme="dark"] .wmeph-pane .setting-input,
+    [wz-theme="dark"] .wmeph-pane .setting-input-full {
+      background: var(--wmeph-dark-bg-secondary);
+      border-color: var(--wmeph-border-light);
+      color: var(--wmeph-text-default);
+    }
+
+    [wz-theme="dark"] .wmeph-pane .setting-select:focus,
+    [wz-theme="dark"] .wmeph-pane .setting-input:focus,
+    [wz-theme="dark"] .wmeph-pane .setting-input-full:focus {
+      border-color: var(--wmeph-primary-lighter);
+      box-shadow: 0 0 0 3px rgba(51, 204, 255, 0.1);
+    }
+
+    [wz-theme="dark"] .wmeph-pane .setting-unit,
+    [wz-theme="dark"] .wmeph-pane .help-text {
+      color: var(--wmeph-text-secondary);
+    }
+
+    [wz-theme="dark"] .wmeph-pane .btn-secondary-modern {
+      background: var(--wmeph-gradient-secondary);
+      color: var(--wmeph-text-default);
+    }
+
+    [wz-theme="dark"] .wmeph-pane .btn-secondary-modern:hover {
+      background: var(--wmeph-gradient-secondary-hover);
+    }
+
+    [wz-theme="dark"] .wmeph-pane .btn-primary-modern:focus {
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(51, 204, 255, 0.3);
+    }
+
+    [wz-theme="dark"] .wmeph-pane .btn-secondary-modern:focus {
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(51, 204, 255, 0.2);
+    }
+
+    [wz-theme="dark"] .wmeph-pane .wmeph-button-group .btn-primary-modern {
+      background: var(--wmeph-gradient-primary);
+      color: white;
+    }
+
+    [wz-theme="dark"] .wmeph-pane .wmeph-button-group .btn-primary-modern:hover {
+      background: var(--wmeph-gradient-primary-hover);
+      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+      transform: translateY(-1px);
+    }
+
+    [wz-theme="dark"] .wmeph-pane .wmeph-button-group .btn-secondary-modern {
+      background: var(--wmeph-gradient-secondary);
+      color: var(--wmeph-text-default);
+    }
+
+    [wz-theme="dark"] .wmeph-pane .wmeph-button-group .btn-secondary-modern:hover {
+      background: var(--wmeph-gradient-secondary-hover);
+      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+      transform: translateY(-1px);
+    }
+
+    [wz-theme="dark"] #WMEPH_banner .wmeph-btn {
+      background-color: var(--wmeph-dark-bg-secondary);
+      border-color: var(--wmeph-dark-border, #55595e);
+    }
+
+    [wz-theme="dark"] #WMEPH_banner .wmeph-btn:hover {
+      background-color: var(--wmeph-dark-bg-tertiary);
+      border-color: var(--wmeph-primary);
+      box-shadow: 0 1px 3px rgba(0, 119, 221, 0.3);
+    }
+
+    [wz-theme="dark"] #WMEPH_banner .wmeph-btn:focus {
+      box-shadow: 0 0 0 2px rgba(51, 204, 255, 0.3);
     }
     `;
+
 
   // **************************************************************************************************************
   // UTILITY/HELPER FUNCTIONS
@@ -3138,7 +4303,7 @@
           ['RESTRICTED', 'Restricted'],
           ['PRIVATE', 'Private'],
         ]
-          .map((btnInfo) => $('<button>', { class: 'wmeph-pla-lot-type-btn btn btn-default btn-xs wmeph-btn', 'data-lot-type': btnInfo[0] }).text(btnInfo[1]).prop('outerHTML'))
+          .map((btnInfo) => $('<button>', { class: 'wmeph-pla-lot-type-btn wmeph-btn', 'data-lot-type': btnInfo[0] }).text(btnInfo[1]).prop('outerHTML'))
           .join('');
         return msg;
       }
@@ -3383,7 +4548,7 @@
     EVChargingStationWarning: class extends FlagBase {
       static defaultMessage =
         'Please do not delete EV Charging Stations. Be sure you are completely up to date with the latest guidelines in ' +
-        '<a href="https://wazeopedia.waze.com/wiki/USA/Places/EV_charging_station" target="_blank">wazeopedia</a>.';
+        '<a href="https://www.waze.com/discuss/t/ev-charging-station-evcs-places/378644" target="_blank">wazeopedia</a>.';
 
       static venueIsFlaggable(args) {
         return !args.highlightOnly && args.categories.includes('CHARGING_STATION');
@@ -3423,18 +4588,10 @@
         ].forEach((btnInfo) => {
           msg += $('<button>', {
             id: `wmeph_${btnInfo[0]}`,
-            class: 'wmeph-evcs-cost-type-btn btn btn-default btn-xs wmeph-btn',
+            class: 'wmeph-evcs-cost-type-btn wmeph-btn',
             title: btnInfo[2],
           })
             .text(btnInfo[1])
-            .css({
-              padding: '3px',
-              height: '20px',
-              lineHeight: '0px',
-              marginRight: '2px',
-              marginBottom: '1px',
-              minWidth: '18px',
-            })
             .prop('outerHTML');
         });
         return msg;
@@ -3760,7 +4917,7 @@
       noBannerAssemble = true;
 
       get message() {
-        let msg = `No HN: <input type="text" id="${Flag.HnMissing.#TEXTBOX_ID}" autocomplete="off" ` + 'style="font-size:0.85em;width:100px;padding-left:2px;color:#000;" > ';
+        let msg = `No HN: <input type="text" id="${Flag.HnMissing.#TEXTBOX_ID}" class="wmeph-input" autocomplete="off" > `;
 
         if (this.args.categories.includes('PARKING_LOT') && this.args.venue.lockRank < 2) {
           if (USER.rank < 3) {
@@ -4539,8 +5696,7 @@
     },
     MissingUSPSZipAlt: class extends WLActionFlag {
       static defaultSeverity = SEVERITY.BLUE;
-      static defaultMessage = `No <a href="${URLS.uspsWiki}" style="color:#3232e6;" target="_blank">ZIP code alt name</a>: <input type="text" \
-id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;padding-left:2px;color:#000;" title="Enter the ZIP code and click Add">`;
+      static defaultMessage = `No <a href="${URLS.uspsWiki}" style="color:#3232e6;" target="_blank">ZIP code alt name</a>: <input type="text" id="WMEPH-zipAltNameAdd" class="wmeph-input" autocomplete="off" title="Enter the ZIP code and click Add">`;
 
       static defaultButtonText = 'Add';
       static WL_KEY = 'missingUSPSZipAlt';
@@ -4845,7 +6001,7 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
     UrlMissing: class extends WLActionFlag {
       static defaultSeverity = SEVERITY.BLUE;
       static get defaultMessage() {
-        return `No URL: <input type="text" id="${Flag.UrlMissing.#TEXTBOX_ID}" autocomplete="off"` + ' style="font-size:0.85em;width:100px;padding-left:2px;color:#000;">';
+        return `No URL: <input type="text" id="${Flag.UrlMissing.#TEXTBOX_ID}" class="wmeph-input" autocomplete="off">`;
       }
 
       static defaultButtonText = 'Add';
@@ -4916,8 +6072,8 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
 
       get message() {
         return (
-          'Area Code appears to be invalid for this region:<br><input type="text" id="WMEPH-PhoneAdd" autocomplete="off" ' +
-          `style="font-size:0.85em;width:100px;padding-left:2px;color:#000;" value="${this.args.phone || ''}">`
+          'Area Code appears to be invalid for this region:<br><input type="text" id="WMEPH-PhoneAdd" class="wmeph-input" autocomplete="off" ' +
+          `value="${this.args.phone || ''}">"`
         );
       }
 
@@ -4935,7 +6091,7 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
         if (newPhone === BAD_PHONE) {
           $('input#WMEPH-PhoneAdd').css({ backgroundColor: '#FDD' }).attr('title', 'Invalid phone # format');
         } else {
-          addUpdateAction(this.args.venue, { phone: newPhone }, null, true);
+          addUpdateAction(this.args.venue, { phone: newPhone }, null, false);
         }
       }
     },
@@ -4955,12 +6111,12 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
       }
 
       action() {
-        addUpdateAction(this.args.venue, { phone: this.args.recommendedPhone }, null, true);
+        addUpdateAction(this.args.venue, { phone: this.args.recommendedPhone }, null, false);
       }
     },
     PhoneMissing: class extends WLActionFlag {
       static defaultSeverity = SEVERITY.BLUE;
-      static defaultMessage = 'No ph#: <input type="text" id="WMEPH-PhoneAdd" autocomplete="off" style="font-size:0.85em;width:100px;padding-left:2px;color:#000;">';
+      static defaultMessage = 'No ph#: <input type="text" id="WMEPH-PhoneAdd" class="wmeph-input" autocomplete="off">';
       static defaultButtonText = 'Add';
       static defaultButtonTooltip = 'Add phone to place';
       static WL_KEY = 'phoneWL';
@@ -4990,7 +6146,7 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
           $('input#WMEPH-PhoneAdd').css({ backgroundColor: '#FDD' }).attr('title', 'Invalid phone # format');
         } else {
           logDev(newPhone);
-          addUpdateAction(this.args.venue, { phone: newPhone }, null, true);
+          addUpdateAction(this.args.venue, { phone: newPhone }, null, false);
         }
       }
 
@@ -5072,32 +6228,33 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
       }
 
       static #getHoursHtml(hasExistingHours = false, alwaysOpen = false) {
-        return $('<span>').append(
-          `${hasExistingHours ? 'Hours' : 'No hours'}:`,
+        const $row1 = $('<div>', { class: 'wmeph-hours-row1' }).append(
+          `• ${hasExistingHours ? 'Hours' : 'No hours'}:`,
           !alwaysOpen
             ? $('<input>', {
-                class: 'btn btn-default btn-xs wmeph-btn',
+                class: 'wmeph-btn',
                 id: 'WMEPH_noHours',
                 title: `Add pasted hours${hasExistingHours ? ' to existing hours' : ''}`,
                 type: 'button',
                 value: 'Add hours',
-                style: 'margin-bottom:4px; margin-right:0px; margin-left:3px;',
               })
             : '',
           hasExistingHours
             ? $('<input>', {
-                class: 'btn btn-default btn-xs wmeph-btn',
+                class: 'wmeph-btn',
                 id: 'WMEPH_noHours_2',
                 title: 'Replace existing hours with pasted hours',
                 type: 'button',
                 value: 'Replace all hours',
-                style: 'margin-bottom:4px; margin-right:0px; margin-left:3px;',
               })
             : '',
+        );
+        const $row2 = $('<div>', { class: 'wmeph-hours-row2' }).html(
           // jquery throws an error when setting autocomplete="off" in a jquery object (must use .autocomplete() function), so just use a string here.
           // eslint-disable-next-line max-len
-          `<textarea id="WMEPH-HoursPaste" wrap="off" autocomplete="off" style="overflow:auto;width:84%;max-width:84%;min-width:84%;font-size:0.85em;height:24px;min-height:24px;max-height:300px;margin-bottom:-2px;padding-left:3px;color:#AAA;position:relative;z-index:1;">${DEFAULT_HOURS_TEXT}`,
-        )[0].outerHTML;
+          `<textarea id="WMEPH-HoursPaste" class="wmeph-input" wrap="off" autocomplete="off">${DEFAULT_HOURS_TEXT}</textarea>`,
+        );
+        return $row1[0].outerHTML + $row2[0].outerHTML;
       }
 
       static #getTitle(parseResult) {
@@ -5275,13 +6432,11 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
           const hoursStringArray = Flag.NoHours.#getHoursStringArray(this.args.openingHours);
           const $hoursTable = $('<div>', {
             id: 'wmeph-hours-list',
-            style:
-              'display: inline-block;font-size: 13px;border: 1px solid #aaa;margin: -6px 2px 2px 0px;border-radius: 0px 0px 5px 5px;background-color: #f5f5f5;color: #727272;' +
-              'padding: 3px 10px 0px 5px !important;z-index: 0;position: relative;min-width: 84%',
             title: 'Current hours',
-          }).append(hoursStringArray.map((entry, idx) => `<div${idx < hoursStringArray.length - 1 ? ' style="border-bottom: 1px solid #ddd;"' : ''}>${entry}</div>`).join(''));
+          }).append(hoursStringArray.map((entry) => `<div>${entry}</div>`).join(''));
 
-          $('#WMEPH-HoursPaste').after($hoursTable);
+          const $row3 = $('<div>', { class: 'wmeph-hours-row3' }).append($hoursTable);
+          $('.wmeph-hours-row2').after($row3);
         }
         // NOTE: Leave these wrapped in the "() => ..." functions, to make sure "this" is bound properly.
         $('#WMEPH_noHours').click(() => this.onAddHoursClick());
@@ -5310,12 +6465,14 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
           $('<i>', {
             id: 'wmeph-paste-hours-btn',
             class: 'fa fa-paste',
-            style: 'font-size: 17px;position: relative;vertical-align: top;top: 2px;right: -5px;margin-right: 3px;color: #6c6c6c;cursor: pointer;',
             title: 'Paste from the clipboard',
+            'aria-label': 'Paste from clipboard',
+            role: 'button',
+            tabindex: '0',
           }),
         ); // , $('<i>', {
         //     id: 'wmeph-clear-hours-btn',
-        //     class: 'fa fa-trash-o',
+        //     class: 'fa fa-trash',
         //     style: 'font-size: 17px;position: relative;right: -5px;bottom: 6px;color: #6c6c6c;cursor: pointer;margin-left: 5px;',
         //     title: 'Clear pasted hours'
         // }));
@@ -5328,6 +6485,19 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
             },
             (err) => logDev(err),
           );
+        });
+
+        // Move WL button into row2 (next to paste button)
+        const $wlBtn = $(`#WMEPH_WL${this.args?.flag?.name || 'NoHours'}`);
+        if ($wlBtn.length) {
+          $wlBtn.appendTo('.wmeph-hours-row2');
+        }
+
+        $('#wmeph-paste-hours-btn').keydown(function(e) {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            $(this).click();
+          }
         });
 
         // $('#wmeph-clear-hours-btn').click(() => {
@@ -5461,7 +6631,7 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
           ['RESTRICTED', 'Restricted'],
           ['PRIVATE', 'Private'],
         ]
-          .map((btnInfo) => $('<button>', { class: 'wmeph-pla-lot-type-btn btn btn-default btn-xs wmeph-btn', 'data-lot-type': btnInfo[0] }).text(btnInfo[1]).prop('outerHTML'))
+          .map((btnInfo) => $('<button>', { class: 'wmeph-pla-lot-type-btn wmeph-btn', 'data-lot-type': btnInfo[0] }).text(btnInfo[1]).prop('outerHTML'))
           .join('')}`;
       }
 
@@ -5496,16 +6666,8 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
           ['EXPENSIVE', '$$$', 'Expensive'],
         ]
           .map((btnInfo) =>
-            $('<button>', { id: `wmeph_${btnInfo[0]}`, class: 'wmeph-pla-cost-type-btn btn btn-default btn-xs wmeph-btn', title: btnInfo[2] })
+            $('<button>', { id: `wmeph_${btnInfo[0]}`, class: 'wmeph-pla-cost-type-btn wmeph-btn', title: btnInfo[2] })
               .text(btnInfo[1])
-              .css({
-                padding: '3px',
-                height: '20px',
-                lineHeight: '0px',
-                marginRight: '2px',
-                marginBottom: '1px',
-                minWidth: '18px',
-              })
               .prop('outerHTML'),
           )
           .join('')}`;
@@ -5602,17 +6764,8 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
         ].forEach((btnInfo) => {
           if (btnIdx === 3) $btnDiv.append('<br>');
           $btnDiv.append(
-            $('<button>', { id: `wmeph_${btnInfo[0]}`, class: 'wmeph-pla-spaces-btn btn btn-default btn-xs wmeph-btn' })
-              .text(btnInfo[1])
-              .css({
-                padding: '3px',
-                height: '20px',
-                lineHeight: '0px',
-                marginTop: '2px',
-                marginRight: '2px',
-                marginBottom: '1px',
-                width: '64px',
-              }),
+            $('<button>', { id: `wmeph_${btnInfo[0]}`, class: 'wmeph-pla-spaces-btn wmeph-btn' })
+              .text(btnInfo[1]),
           );
           btnIdx++;
         });
@@ -5768,7 +6921,7 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
       static defaultButtonTooltip = 'Lock the residential point';
 
       get message() {
-        let msg = 'Lock at <select id="RPPLockLevel">';
+        let msg = 'Lock at <select id="RPPLockLevel" class="wmeph-select">';
         let ddlSelected = false;
         for (let llix = 1; llix < 6; llix++) {
           if (llix < USER.rank + 1) {
@@ -6125,12 +7278,17 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
 
         if (args.venue.lockRank < args.levelToLock) {
           if (!args.highlightOnly) {
-            logDev(`Venue locked! Current: ${args.venue.lockRank}, Target: ${args.levelToLock}`);
-            // Use SDK to update venue directly - wrap in try-catch since locking may fail due to permissions
-            try {
-              addUpdateAction(args.venue, { lockRank: args.levelToLock }, args.actions);
-            } catch (e) {
-              logDev('Could not lock venue - you may not have permission', e);
+            // Check if we already locked this venue in this harmonization session (prevents double-locking from re-harmonization)
+            if (!_lockedVenuesThisSession.has(args.venue.id)) {
+              logDev(`Venue locked! Current: ${args.venue.lockRank}, Target: ${args.levelToLock}`);
+              // Use same pattern as HN/URL/PHONE/services - direct push to actions array for consistent undo tracking
+              try {
+                args.actions.push(sdk.DataModel.Venues.updateVenue({ venueId: args.venue.id, lockRank: args.levelToLock }));
+                UPDATED_FIELDS.checkNewAttributes({ lockRank: args.levelToLock }, args.venue);
+                _lockedVenuesThisSession.add(args.venue.id);
+              } catch (e) {
+                logDev('Could not lock venue - you may not have permission', e);
+              }
             }
           } else {
             this.hlLockFlag = true;
@@ -7079,28 +8237,82 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
 
   function onVenuesChanged(venueProxies) {
     deleteDupeLabel();
-    _previousVenueServices = null; // Reset when venue selection changes
 
     const venue = getSelectedVenue();
+    const venueId = venue?.id;
+    const hadVenueSelected = _currentlySelectedVenueId !== null;
+    const hasVenueSelected = venueId !== null;
+
+    // Reset trackers if: (1) venue ID changed, (2) venue was deselected then reselected, or (3) just selected a venue
+    if (venueId !== _currentlySelectedVenueId || (hadVenueSelected && !hasVenueSelected) || (!hadVenueSelected && hasVenueSelected)) {
+      _previousVenueServices = null;
+      _previousVenueLockRank = null;
+      _previousVenuePhone = null;
+      _previousVenueUrl = null;
+      _previousVenueHours = null;
+      _lockedVenuesThisSession.clear();
+      _normalizedPhoneThisSession.clear();
+      _normalizedUrlThisSession.clear();
+      _correctedHoursThisSession.clear();
+      _correctedRestAreaNameThisSession.clear();
+      _currentlySelectedVenueId = venueId;
+    }
+
     if (venueProxies.map((proxy) => proxy.id).includes(venue?.id)) {
       if ($('#WMEPH_banner').length && venue?.id && !_isHarmonizing) {
         // Compare current services with previous state to detect services-only changes
         const currentServices = JSON.stringify((venue.services || []).sort());
         const isServicesOnlyChange = _previousVenueServices !== null && _previousVenueServices === currentServices;
 
-        // Skip harmonization if ONLY services changed (UI sync handles it)
-        if (!isServicesOnlyChange) {
+        // Detect lock-level-only changes (prevents re-harmonization on undo actions)
+        const isLockOnlyChange = _previousVenueLockRank !== null && _previousVenueLockRank !== venue.lockRank &&
+          _previousVenueServices !== null && _previousVenueServices === currentServices;
+
+        // Detect phone-only changes (prevents re-harmonization on undo actions)
+        const isPhoneOnlyChange = _previousVenuePhone !== null && _previousVenuePhone !== venue.phone &&
+          _previousVenueServices !== null && _previousVenueServices === currentServices &&
+          _previousVenueLockRank === venue.lockRank;
+
+        // Detect URL-only changes (prevents re-harmonization on undo actions)
+        const currentUrl = venue.url || null;
+        const isUrlOnlyChange = _previousVenueUrl !== null && _previousVenueUrl !== currentUrl &&
+          _previousVenueServices !== null && _previousVenueServices === currentServices &&
+          _previousVenueLockRank === venue.lockRank && _previousVenuePhone === venue.phone;
+
+        // Detect hours-only changes (prevents re-harmonization on undo actions)
+        const currentHours = JSON.stringify(venue.openingHours || []);
+        const isHoursOnlyChange = _previousVenueHours !== null && _previousVenueHours !== currentHours &&
+          _previousVenueServices !== null && _previousVenueServices === currentServices &&
+          _previousVenueLockRank === venue.lockRank && _previousVenuePhone === venue.phone &&
+          _previousVenueUrl === currentUrl;
+
+        // Skip harmonization if ONLY services, lock level, phone, URL, or hours changed
+        if (!isServicesOnlyChange && !isLockOnlyChange && !isPhoneOnlyChange && !isUrlOnlyChange && !isHoursOnlyChange) {
           // Auto-harmonize when venue with banner is modified (but not if already harmonizing)
           harmonizePlaceGo(venue, 'harmonize');
           // Refresh all highlights to sync layer features with updated venue properties
           refreshAllHighlights();
         } else if (_previousVenueServices !== null) {
           // Log for dev visibility
-          logDev('Skipped full re-run — services UI sync only');
+          if (isServicesOnlyChange) {
+            logDev('Skipped full re-run — services UI sync only');
+          } else if (isLockOnlyChange) {
+            logDev('Skipped full re-run — lock level change only (undo action)');
+          } else if (isPhoneOnlyChange) {
+            logDev('Skipped full re-run — phone number change only (undo action)');
+          } else if (isUrlOnlyChange) {
+            logDev('Skipped full re-run — URL change only (undo action)');
+          } else if (isHoursOnlyChange) {
+            logDev('Skipped full re-run — hours change only (undo action)');
+          }
         }
 
-        // Update tracker for next change
+        // Update trackers for next change
         _previousVenueServices = currentServices;
+        _previousVenueLockRank = venue.lockRank;
+        _previousVenuePhone = venue.phone;
+        _previousVenueUrl = currentUrl;
+        _previousVenueHours = currentHours;
       }
 
       updateWmephPanel();
@@ -7423,6 +8635,24 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
       eventName: 'wme-map-move-end',
       eventHandler: () => {
         refreshAllHighlights();
+      },
+    });
+
+    // Listen for venue selection changes to reset lock tracking (allows fresh lock checks when reselecting a venue)
+    sdk.Events.on({
+      eventName: 'wme-selection-changed',
+      eventHandler: () => {
+        _previousVenueLockRank = null;
+        _previousVenueServices = null;
+        _previousVenuePhone = null;
+        _previousVenueUrl = null;
+        _previousVenueHours = null;
+        _lockedVenuesThisSession.clear();
+        _normalizedPhoneThisSession.clear();
+        _normalizedUrlThisSession.clear();
+        _correctedHoursThisSession.clear();
+        _correctedRestAreaNameThisSession.clear();
+        _currentlySelectedVenueId = getSelectedVenue()?.id || null;
       },
     });
 
@@ -8951,7 +10181,8 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
               _servicesBanner.add247.active = true;
             }
 
-            if (!args.hoursOverlap) {
+            // Only correct M-S hours if not already corrected in this session (prevents undo re-application)
+            if (!_correctedHoursThisSession.has(venue.id) && !args.hoursOverlap) {
               const tempHours = args.openingHours.slice();
               for (let ohix = 0; ohix < args.openingHours.length; ohix++) {
                 if (tempHours[ohix].days.length === 2 && tempHours[ohix].days[0] === 1 && tempHours[ohix].days[1] === 0) {
@@ -8961,6 +10192,7 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
                   tempHours[ohix].days = [1];
                   args.openingHours = tempHours;
                   addUpdateAction(venue, { openingHours: tempHours }, actions);
+                  _correctedHoursThisSession.add(venue.id);
                 }
               }
             }
@@ -8972,19 +10204,25 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
               addUpdateAction(venue, { url: args.url }, actions);
             }
             args.normalizedUrl = normalizeURL(args.url);
-            if (args.isUspsPostOffice && args.url !== 'usps.com') {
-              args.url = 'usps.com';
-              addUpdateAction(venue, { url: args.url }, actions);
-            } else if (!args.pnhUrl && args.normalizedUrl !== args.url) {
-              if (args.normalizedUrl !== BAD_URL) {
-                args.url = args.normalizedUrl;
-                logDev('URL formatted');
+            // Only auto-normalize URL if not already normalized in this session (prevents undo re-application)
+            if (!_normalizedUrlThisSession.has(venue.id)) {
+              if (args.isUspsPostOffice && args.url !== 'usps.com') {
+                args.url = 'usps.com';
                 addUpdateAction(venue, { url: args.url }, actions);
+                _normalizedUrlThisSession.add(venue.id);
+              } else if (!args.pnhUrl && args.normalizedUrl !== args.url) {
+                if (args.normalizedUrl !== BAD_URL) {
+                  args.url = args.normalizedUrl;
+                  logDev('URL formatted');
+                  addUpdateAction(venue, { url: args.url }, actions);
+                  _normalizedUrlThisSession.add(venue.id);
+                }
+              } else if (args.pnhUrl && isNullOrWhitespace(args.url)) {
+                args.url = args.pnhUrl;
+                logDev('URL updated');
+                addUpdateAction(venue, { url: args.url }, actions);
+                _normalizedUrlThisSession.add(venue.id);
               }
-            } else if (args.pnhUrl && isNullOrWhitespace(args.url)) {
-              args.url = args.pnhUrl;
-              logDev('URL updated');
-              addUpdateAction(venue, { url: args.url }, actions);
             }
 
             if (args.phone) {
@@ -8992,11 +10230,15 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
               if (Flag.ClearThisPhone.venueIsFlaggable(args)) {
                 args.phone = null;
               }
-              const normalizedPhone = normalizePhone(args.phone, args.outputPhoneFormat);
-              if (normalizedPhone !== BAD_PHONE) args.phone = normalizedPhone;
-              if (args.phone !== venue.phone) {
-                logDev('Phone updated');
-                addUpdateAction(venue, { phone: args.phone }, actions);
+              // Only auto-normalize phone if not already normalized in this session (prevents undo re-application)
+              if (!_normalizedPhoneThisSession.has(venue.id)) {
+                const normalizedPhone = normalizePhone(args.phone, args.outputPhoneFormat);
+                if (normalizedPhone !== BAD_PHONE) args.phone = normalizedPhone;
+                if (args.phone !== venue.phone) {
+                  logDev('Phone updated');
+                  addUpdateAction(venue, { phone: args.phone }, actions);
+                  _normalizedPhoneThisSession.add(venue.id);
+                }
               }
             }
 
@@ -9016,11 +10258,13 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
 
       if (!args.chainIsClosed) {
         if (!args.highlightOnly && args.categories.includes('REST_AREAS')) {
-          if (venue.name.match(/^Rest Area.* - /) !== null && args.countryCode === PNH_DATA.USA.countryCode) {
+          // Only correct Rest Area name if not already corrected in this session (prevents undo re-application)
+          if (!_correctedRestAreaNameThisSession.has(venue.id) && venue.name.match(/^Rest Area.* - /) !== null && args.countryCode === PNH_DATA.USA.countryCode) {
             const newSuffix = args.nameSuffix.replace(/\bMile\b/i, 'mile');
             if (args.nameBase + newSuffix !== venue.name) {
               addUpdateAction(venue, { name: args.nameBase + newSuffix }, actions);
               logDev('Lower case "mile"');
+              _correctedRestAreaNameThisSession.add(venue.id);
             }
             // If names match after lowercasing "Mile", no action is needed
             // (would only have been a capitalization change, which is not desired)
@@ -9438,13 +10682,12 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
         if (rowData.WLactive && rowData.WLaction) {
           // If there's a WL option, enable it
           totalSeverity = Math.max(rowData.severity, totalSeverity);
-          $dupeDiv.append(
-            $('<button>', {
-              class: 'btn btn-success btn-xs wmephwl-btn',
-              id: `WMEPH_WL${tempKey}`,
-              title: rowData.wlTooltip,
-            }).text(rowData.WLvalue),
-          );
+          const $wlButton = $('<button>', {
+            class: 'wmephwl-btn',
+            id: `WMEPH_WL${tempKey}`,
+            title: rowData.wlTooltip,
+          }).text(rowData.WLvalue);
+          $dupeDiv.append($wlButton);
         }
       }
     });
@@ -9485,32 +10728,27 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
         $rowDiv.append($('<span>').css({ 'margin-right': '4px' }).append(`&bull; ${flag.message}`));
       }
       if (flag.buttonText) {
-        $rowDiv.append(
-          $('<button>', {
-            class: 'btn btn-default btn-xs wmeph-btn',
-            id: `WMEPH_${flag.name}`,
-            title: flag.title || '',
-          })
-            .css({ 'margin-right': '4px' })
-            .html(flag.buttonText),
-        );
+        const $button = $('<button>', {
+          class: 'wmeph-btn',
+          id: `WMEPH_${flag.name}`,
+          title: flag.title || '',
+        }).html(flag.buttonText);
+        $rowDiv.append($button);
       }
       if (flag.value2) {
-        $rowDiv.append(
-          $('<button>', {
-            class: 'btn btn-default btn-xs wmeph-btn',
-            id: `WMEPH_${flag.name}_2`,
-            title: flag.title2 || '',
-          })
-            .css({ 'margin-right': '4px' })
-            .html(flag.value2),
-        );
+        const $button2 = $('<button>', {
+          class: 'wmeph-btn',
+          id: `WMEPH_${flag.name}_2`,
+          title: flag.title2 || '',
+        }).html(flag.value2);
+        $rowDiv.append($button2);
       }
       if (flag.showWL) {
         if (flag.WLaction) {
           // If there's a WL option, enable it
           totalSeverity = Math.max(flag.severity, totalSeverity);
-          $rowDiv.append($('<button>', { class: 'btn btn-success btn-xs wmephwl-btn', id: `WMEPH_WL${flag.name}`, title: flag.wlTooltip }).text('WL'));
+          const $wlButton = $('<button>', { class: 'wmephwl-btn', id: `WMEPH_WL${flag.name}`, title: flag.wlTooltip }).text('WL');
+          $rowDiv.append($wlButton);
         }
       } else {
         totalSeverity = Math.max(flag.severity, totalSeverity);
@@ -9619,7 +10857,9 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
             class: 'banner-row gray',
             style: 'padding-top: 4px;color: #646464;padding-left: 8px;',
           })
-            .text(' Links')
+            .append(
+              $('<span>', { class: 'google-logo gray', text: ' Links' })
+            )
             .prepend(
               googleLogoLetter('G', 'blue'),
               googleLogoLetter('o', 'red'),
@@ -9632,8 +10872,11 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
               $('<i>', {
                 id: 'wmeph-ext-prov-jump',
                 title: 'Jump to external providers section',
-                class: 'fa fa-level-down',
+                'aria-label': 'Jump to external providers section',
+                class: 'fa fa-arrow-turn-down-left',
                 style: 'font-size: 15px;float: right;color: cadetblue;cursor: pointer;padding-left: 6px;',
+                role: 'button',
+                tabindex: '0',
               }),
             ),
         );
@@ -9661,10 +10904,12 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
                               href: result.website,
                               target: '_blank',
                               title: "Open the place's website, according to Google",
+                              'aria-label': "Open website (according to Google)",
                             }).append(
                               $('<i>', {
                                 class: 'fa fa-external-link',
                                 style: 'font-size: 16px;position: relative;top: 1px;',
+                                'aria-hidden': 'true',
                               }),
                             ),
                             $('<span>', {
@@ -9678,10 +10923,12 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
                             href: result.url,
                             target: '_blank',
                             title: 'Open the place in Google Maps',
+                            'aria-label': 'Open in Google Maps',
                           }).append(
                             $('<i>', {
-                              class: 'fa fa-map-o',
+                              class: 'fa fa-map',
                               style: 'font-size: 16px;',
+                              'aria-hidden': 'true',
                             }),
                           )
                         : null,
@@ -9731,6 +10978,13 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
               }, 1500);
             }, 250);
           }, 0);
+        });
+
+        $('#wmeph-ext-prov-jump').keydown(function(e) {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            $(this).click();
+          }
         });
       }
     } catch (err) {
@@ -10152,10 +11406,7 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
     if (currentState !== checkedState) {
       setWMEPHSetting(id, checkedState ? '1' : '0');
       const $button = $(`#${id}`);
-      $button.css({
-        color: checkedState ? '#0075e3' : '#999',
-        opacity: checkedState ? '1' : '0.5',
-      });
+      $button.toggleClass('checked', checkedState);
     }
   }
   /**
@@ -10409,7 +11660,7 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
    * @param {boolean} clearBanner Whether to remove the entire WMEPH section (triggered when venue loses edit access).
    */
   function updateWmephPanel(clearBanner = false) {
-    logDev(`updateWmephPanel: clearBanner=${clearBanner}`);
+    //logDev(`updateWmephPanel: clearBanner=${clearBanner}`);
 
     const venue = getSelectedVenue();
 
@@ -10543,13 +11794,14 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
           let feedNames = res.venue.external_providers?.filter((prov) => !FEEDS_TO_SKIP.some((skipRegex) => skipRegex.test(prov.provider))).map((prov) => prov.provider);
           if (feedNames) feedNames = [...new Set(feedNames)]; // Remove duplicates
           if (feedNames?.length) {
-            const $rowDiv = $('<div>').css({ padding: '3px 4px 0px 4px', 'background-color': 'yellow' });
+            const $rowDiv = $('<div>', { class: 'wmeph-feed-warning' });
             $rowDiv.append(
-              $('<div>').text('PLEASE DO NOT DELETE').css({ 'font-weight': '500' }),
-              $('<div>')
-                .text(`Place is connected to the following feed${feedNames.length > 1 ? 's' : ''}:`)
-                .css({ 'font-size': '13px' }),
-              $('<div>').text(feedNames.join(', ')).css({ 'font-size': '13px' }),
+              $('<div>', { class: 'wmeph-feed-warning-title', text: 'PLEASE DO NOT DELETE' }),
+              $('<div>', {
+                class: 'wmeph-feed-warning-desc',
+                text: `Place is connected to the following feed${feedNames.length > 1 ? 's' : ''}:`,
+              }),
+              $('<div>', { class: 'wmeph-feed-warning-list', text: feedNames.join(', ') }),
             );
             $wmephPrePanel.append($rowDiv);
             // Potential code to hide the delete key if needed.
@@ -11277,21 +12529,51 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
 
   /**
    * Creates a checkbox element with associated label and appends to a parent container.
-   * Returns the checkbox jQuery object for further event binding or state management.
-   * Used to build the settings UI in the PlaceHarmonizer tab.
-   * @param {jQuery} $div Parent container to append the checkbox and label to.
+   * Supports both jQuery and native DOM parents.
+   * @param {jQuery|HTMLElement} container Parent container (jQuery object or HTMLElement).
    * @param {string} settingID The HTML id for the checkbox element (used as settings key).
    * @param {string} textDescription The label text displayed next to the checkbox.
-   * @returns {jQuery} The created checkbox element (useful for attaching additional handlers).
+   * @returns {HTMLElement} The created checkbox element.
    */
-  function createSettingsCheckbox($div, settingID, textDescription) {
-    const $checkbox = $('<input>', { type: 'checkbox', id: settingID });
-    $div.append(
-      $('<div>', { class: 'controls-container' })
-        .css({ paddingTop: '2px' })
-        .append($checkbox, $('<label>', { for: settingID }).text(textDescription).css({ whiteSpace: 'pre-line' })),
-    );
-    return $checkbox;
+  /**
+   * Creates a checkbox row with a checkbox on the left and clickable label on the right.
+   * @param {string} settingID - Unique ID for the checkbox
+   * @param {string} labelText - Text label for the checkbox
+   * @returns {Object} Object with { row, checkbox, label } elements
+   */
+  function createCheckboxRow(settingID, labelText) {
+    const checkbox = createElem('input', {
+      type: 'checkbox',
+      id: settingID,
+      class: 'wmeph-checkbox'
+    });
+
+    const label = createElem('label', {
+      for: settingID,
+      class: 'wmeph-checkbox-label',
+      textContent: labelText
+    });
+
+    const row = createElem('div', { class: 'wmeph-checkbox-row' });
+    row.appendChild(checkbox);
+    row.appendChild(label);
+
+    return { row, checkbox, label };
+  }
+
+  function createSettingsCheckbox(container, settingID, textDescription) {
+    const { row, checkbox } = createCheckboxRow(settingID, textDescription);
+
+    // Support both jQuery and native DOM
+    if (container && container.append && typeof container.append === 'function') {
+      // jQuery
+      $(row).appendTo(container);
+    } else if (container && container.appendChild) {
+      // Native DOM
+      container.appendChild(row);
+    }
+
+    return checkbox;
   }
 
   /**
@@ -11606,6 +12888,236 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
     window.open(`https://docs.google.com/forms/d/1k_5RyOq81Fv4IRHzltC34kW3IUbXnQqDVMogwJKFNbE/viewform?entry.1173700072=${USER.name}`);
   }
 
+  // **************************************************************************************************************
+  // UI HELPER FUNCTIONS - Reusable DOM creation utilities
+  // **************************************************************************************************************
+
+  /**
+   * Generic element creator with attributes and event listeners.
+   * Handles both standard attributes and special properties (textContent, innerHTML).
+   * @param {string} tag - HTML tag name (e.g., 'div', 'button', 'input')
+   * @param {Object} attrs - Attributes object where keys are attribute names and values are attribute values.
+   *                        Special keys: 'textContent' and 'innerHTML' set element content directly.
+   * @param {Array} events - Array of {event, handler} objects for attaching event listeners
+   * @returns {HTMLElement} Created DOM element
+   */
+  function createElem(tag, attrs = {}, events = []) {
+    const elem = document.createElement(tag);
+    Object.entries(attrs).forEach(([key, value]) => {
+      if (key === 'textContent' || key === 'innerHTML') {
+        elem[key] = value;
+      } else {
+        elem.setAttribute(key, value);
+      }
+    });
+    events.forEach(({ event, handler }) => {
+      elem.addEventListener(event, handler);
+    });
+    return elem;
+  }
+
+  /**
+   * Creates a card component with header (icon + title) and body.
+   * Returns an object with the main card and body reference for easy population.
+   * @param {string} title - Card title text
+   * @param {string} iconClass - FontAwesome icon class (e.g., 'fa-cogs'). Pass empty string to omit icon.
+   * @returns {Object} {card: HTMLElement, header: HTMLElement, body: HTMLElement}
+   */
+  function makeCard(title, iconClass = 'fa-cogs') {
+    const card = createElem('div', { class: 'wmeph-card' });
+    const header = createElem('div', { class: 'wmeph-card-header' });
+
+    if (iconClass) {
+      const icon = createElem('i', { class: `fa ${iconClass}`, 'aria-hidden': 'true' });
+      header.appendChild(icon);
+    }
+
+    const titleElem = createElem('h3', { class: 'wmeph-card-title', textContent: title });
+    header.appendChild(titleElem);
+    card.appendChild(header);
+
+    const body = createElem('div', { class: 'wmeph-card-body' });
+    card.appendChild(body);
+
+    return { card, header, body };
+  }
+
+  /**
+   * Creates a flex row with label and optional control element.
+   * Typically used for form rows like (Label: [Input/Button/etc]).
+   * @param {string} labelText - Label text to display
+   * @param {HTMLElement|null} control - Control element (input, button, select, etc). Pass null for label-only rows.
+   * @returns {HTMLElement} Row div with wmeph-row class
+   */
+  function makeRow(labelText, control) {
+    const row = createElem('div', { class: 'wmeph-row' });
+    const label = createElem('span', { class: 'wmeph-label', textContent: labelText });
+    row.appendChild(label);
+    if (control) row.appendChild(control);
+    return row;
+  }
+
+  /**
+   * Creates a styled button element with optional secondary/disabled states.
+   * Attaches click handler directly to the element.
+   * @param {string} text - Button label text
+   * @param {Function} onClick - Click handler function
+   * @param {Object} options - Configuration options
+   * @param {boolean} options.secondary - If true, applies secondary button styling
+   * @param {boolean} options.disabled - If true, button starts in disabled state
+   * @returns {HTMLElement} button element with wmeph-btn class
+   */
+  function makeButton(text, onClick, options = {}) {
+    const classList = ['wmeph-btn'];
+    if (options.secondary) classList.push('secondary');
+
+    const attrs = {
+      class: classList.join(' '),
+      textContent: text,
+    };
+    if (options.disabled) attrs.disabled = 'disabled';
+
+    const btn = createElem('button', attrs, [{ event: 'click', handler: onClick }]);
+    return btn;
+  }
+
+  /**
+   * Creates a checkbox input with change handler.
+   * Handler receives the boolean checked state.
+   * @param {boolean} checked - Initial checked state (default: false)
+   * @param {Function} onChange - Change handler that receives the new checked boolean value
+   * @returns {HTMLElement} input[type=checkbox] with wmeph-checkbox class
+   */
+  function makeCheckbox(checked = false, onChange) {
+    const attrs = {
+      type: 'checkbox',
+      class: 'wmeph-checkbox',
+    };
+    if (checked) attrs.checked = 'checked';
+
+    const input = createElem('input', attrs, [
+      {
+        event: 'change',
+        handler: (e) => onChange(e.target.checked),
+      },
+    ]);
+    return input;
+  }
+
+  /**
+   * Creates a styled badge or tag element.
+   * Useful for displaying small status indicators or labels.
+   * @param {string} text - Badge text content
+   * @param {boolean} secondary - If true, applies secondary badge styling (default: false)
+   * @returns {HTMLElement} span with wmeph-badge class
+   */
+  function makeBadge(text, secondary = false) {
+    const classList = ['wmeph-badge'];
+    if (secondary) classList.push('secondary');
+
+    const badge = createElem('span', {
+      class: classList.join(' '),
+      textContent: text,
+    });
+    return badge;
+  }
+
+  /**
+   * Creates a select (dropdown) element with options.
+   * @param {Array} options - Array of {value, text} objects or just text strings
+   * @param {Function} onChange - Change handler that receives the selected value
+   * @param {Object} attrs - Additional attributes for the select element (e.g., disabled, multiple)
+   * @returns {HTMLElement} select element with wmeph-select class
+   */
+  function makeSelect(options, onChange, attrs = {}) {
+    const selectAttrs = {
+      class: 'wmeph-select',
+      ...attrs,
+    };
+    const select = createElem('select', selectAttrs, [
+      {
+        event: 'change',
+        handler: (e) => onChange(e.target.value),
+      },
+    ]);
+
+    options.forEach((opt) => {
+      const optionText = typeof opt === 'string' ? opt : opt.text;
+      const optionValue = typeof opt === 'string' ? opt : opt.value;
+      const option = createElem('option', { value: optionValue, textContent: optionText });
+      select.appendChild(option);
+    });
+
+    return select;
+  }
+
+  /**
+   * Creates a text input element with optional placeholder and change handler.
+   * @param {string} placeholder - Placeholder text (optional)
+   * @param {Function} onChange - Change handler that receives the input value (optional)
+   * @param {Object} attrs - Additional attributes (e.g., maxLength, disabled)
+   * @returns {HTMLElement} input[type=text] with wmeph-input class
+   */
+  function makeInput(placeholder = '', onChange, attrs = {}) {
+    const inputAttrs = {
+      type: 'text',
+      class: 'wmeph-input',
+      ...(placeholder && { placeholder }),
+      ...attrs,
+    };
+
+    const events = onChange
+      ? [
+          {
+            event: 'change',
+            handler: (e) => onChange(e.target.value),
+          },
+        ]
+      : [];
+
+    const input = createElem('input', inputAttrs, events);
+    return input;
+  }
+
+  /**
+   * Creates a collapsible section component with toggle functionality.
+   * @param {string} title - Section title text
+   * @param {string} iconClass - FontAwesome icon class (e.g., 'fa-cogs')
+   * @param {boolean} [isExpanded=true] - Initial expanded state
+   * @returns {Object} {section: HTMLElement, header: HTMLElement, body: HTMLElement}
+   */
+  function createCollapsibleSection(title, iconClass, isExpanded = true) {
+    const section = createElem('div', {
+      class: `settings-section ${isExpanded ? '' : 'collapsed'}`
+    });
+
+    const icon = createElem('i', { class: `fa ${iconClass}` });
+    const titleSpan = createElem('span');
+    titleSpan.textContent = title;
+
+    const titleDiv = createElem('div', { class: 'settings-section-title' });
+    titleDiv.appendChild(icon);
+    titleDiv.appendChild(titleSpan);
+
+    const toggleIcon = createElem('i', { class: 'fa fa-chevron-down section-toggle-icon' });
+
+    const header = createElem('div', { class: 'settings-section-header' });
+    header.appendChild(titleDiv);
+    header.appendChild(toggleIcon);
+
+    const body = createElem('div', { class: 'settings-section-body' });
+
+    section.appendChild(header);
+    section.appendChild(body);
+
+    // Toggle collapse on header click
+    header.addEventListener('click', function() {
+      section.classList.toggle('collapsed');
+    });
+
+    return { section, header, body };
+  }
+
   /**
    * Initializes all settings checkboxes and button handlers in the WMEPH settings tab.
    * Sets default values, attaches click handlers, and configures feature-specific behavior.
@@ -11694,6 +13206,34 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
     $('#WMEPH-WLStateFilter').click(onWLStateFilterClick);
     $('#WMEPH-WLShare').click(onWLShareClick);
 
+    // Bootstrap Tab Switching
+    $('#wmeph-tab-harmonize, #wmeph-tab-hl-scan, #wmeph-tab-wl-tools, #wmeph-tab-moderation').on('click', function(e) {
+      e.preventDefault();
+      const target = $(this).attr('href');
+      const tabPanels = document.querySelectorAll('.wmeph-pane .tab-pane');
+      const tabLinks = document.querySelectorAll('.wmeph-pane .wmeph-internal-tabs .nav-link');
+
+      // Hide all panels
+      tabPanels.forEach(panel => {
+        panel.classList.remove('active', 'show');
+      });
+
+      // Deactivate all tab links
+      tabLinks.forEach(link => {
+        link.classList.remove('active');
+        link.setAttribute('aria-selected', 'false');
+      });
+
+      // Show the target panel
+      const targetPanel = document.querySelector(target);
+      if (targetPanel) {
+        targetPanel.classList.add('active', 'show');
+      }
+
+      // Activate the clicked tab
+      $(this).addClass('active').attr('aria-selected', 'true');
+    });
+
     // Color highlighting - these affect severity calculations, so clear cache when toggled
     $('#WMEPH-ColorHighlighting').click(bootstrapWmephColorHighlights);
     $('#WMEPH-DisableHoursHL').click(() => {
@@ -11739,122 +13279,220 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
     // Set up the CSS
     GM_addStyle(_CSS);
 
-    const $container = $('<div>');
-    const $reloadDataBtn = $(
-      '<div style="margin-bottom:6px; text-align:center;"><div style="position:relative; display:inline-block; width:75%"><input id="WMEPH-ReloadDataBtn" style="min-width:90px; width:50%" class="btn btn-success wmeph-fat-btn" type="button" title="Refresh Data" value="Refresh Data"/><div class="checkmark draw"></div></div></div>',
-    );
-    const $navTabs = $(
-      '<ul class="nav nav-tabs"><li class="active"><a data-toggle="tab" href="#sidepanel-harmonizer">Harmonize</a></li>' +
-        '<li><a data-toggle="tab" href="#sidepanel-highlighter">HL / Scan</a></li>' +
-        '<li><a data-toggle="tab" href="#sidepanel-wltools">WL Tools</a></li>' +
-        '<li><a data-toggle="tab" href="#sidepanel-pnh-moderators">Moderators</a></li></ul>',
-    );
-    const $tabContent = $('<div class="tab-content">');
-    const $versionDiv = $('<div>').text(`WMEPH ${BETA_VERSION_STR} v${SCRIPT_VERSION}`).css({ color: '#999', fontSize: '13px' });
-    const $harmonizerTab = $('<div class="tab-pane wmeph-pane active" id="sidepanel-harmonizer"></div>');
-    const $highlighterTab = $('<div class="tab-pane wmeph-pane" id="sidepanel-highlighter"></div>');
-    const $wlToolsTab = $('<div class="tab-pane wmeph-pane" id="sidepanel-wltools"></div>');
-    const $moderatorsTab = $('<div class="tab-pane wmeph-pane" id="sidepanel-pnh-moderators"></div>');
-    $tabContent.append($harmonizerTab, $highlighterTab, $wlToolsTab, $moderatorsTab);
-    $container.append($reloadDataBtn, $navTabs, $tabContent, $versionDiv);
-
-    // Harmonizer settings
-    createSettingsCheckbox($harmonizerTab, 'WMEPH-WebSearchNewTab', 'Open URL & Search Results in new tab instead of new window');
-    createSettingsCheckbox($harmonizerTab, 'WMEPH-EnableIAZoom', 'Enable zoom & center for places with no address');
-    createSettingsCheckbox($harmonizerTab, 'WMEPH-HidePlacesWiki', 'Hide "Places Wiki" button in results banner');
-    createSettingsCheckbox($harmonizerTab, 'WMEPH-HideServicesButtons', 'Hide services buttons in results banner');
-    createSettingsCheckbox($harmonizerTab, 'WMEPH-HidePURWebSearch', 'Hide "Web Search" button on PUR popups');
-    createSettingsCheckbox($harmonizerTab, 'WMEPH-ExcludePLADupes', 'Exclude parking lots when searching for duplicate places');
-    createSettingsCheckbox($harmonizerTab, 'WMEPH-ShowPLAExitWhileClosed', 'Always ask if cars can exit parking lots');
-    if (USER.isDevUser || USER.isBetaUser || USER.rank >= 2) {
-      createSettingsCheckbox($harmonizerTab, 'WMEPH-DisablePLAExtProviderCheck', 'Disable check for "Google place link" on Parking Lot Areas');
-      createSettingsCheckbox($harmonizerTab, 'WMEPH-AddAddresses', 'Add detected address fields to places with no address');
-      createSettingsCheckbox($harmonizerTab, 'WMEPH-EnableCloneMode', 'Enable place cloning tools');
-      createSettingsCheckbox($harmonizerTab, 'WMEPH-AutoLockRPPs', 'Lock residential place points to region default');
-    }
-
-    $harmonizerTab.append('<hr class="wmeph-hr" align="center" width="100%">');
-
-    // Add Letter input box
-    const $phShortcutDiv = $('<div id="PlaceHarmonizerKB">');
-    // eslint-disable-next-line max-len
-    $phShortcutDiv.append(
-      '<div id="PlaceHarmonizerKBWarn"></div>Shortcut Letter (a-Z): <input type="text" maxlength="1" id="WMEPH-KeyboardShortcut" style="width: 30px;padding-left:8px"><div id="PlaceHarmonizerKBCurrent"></div>',
-    );
-    createSettingsCheckbox($phShortcutDiv, 'WMEPH-KBSModifierKey', 'Use Ctrl instead of Alt'); // Add Alt-->Ctrl checkbox
-
-    if (USER.isDevUser) {
-      // Override script regionality (devs only)
-      $phShortcutDiv.append('<hr class="wmeph-hr" align="center" width="100%"><p>Dev Only Settings:</p>');
-      createSettingsCheckbox($phShortcutDiv, 'WMEPH-RegionOverride', 'Disable Region Specificity');
-    }
-
-    $harmonizerTab.append(
-      $phShortcutDiv,
-      '<hr class="wmeph-hr" align="center" width="100%">',
-      `<div><a href="${URLS.placesWiki}" target="_blank">Open the WME Places Wiki page</a></div>`,
-      `<div><a href="${URLS.forum}" target="_blank">Submit script feedback & suggestions</a></div>`,
-      '<hr class="wmeph-hr" align="center" width="95%">',
-    );
-
-    // Highlighter settings
-    $highlighterTab.append('<p>Highlighter Settings:</p>');
-    createSettingsCheckbox($highlighterTab, 'WMEPH-ColorHighlighting', 'Enable color highlighting of map to indicate places needing work');
-    createSettingsCheckbox($highlighterTab, 'WMEPH-HideGreenPlaces', 'Disable highlighting for places NOT needing work (green places)');
-    createSettingsCheckbox($highlighterTab, 'WMEPH-DisableHoursHL', 'Disable highlighting for missing hours');
-    createSettingsCheckbox($highlighterTab, 'WMEPH-DisableRankHL', 'Disable highlighting for places locked above your rank');
-    createSettingsCheckbox($highlighterTab, 'WMEPH-DisableWLHL', 'Disable Whitelist highlighting (shows all missing info regardless of WL)');
-    createSettingsCheckbox($highlighterTab, 'WMEPH-PLATypeFill', 'Fill parking lots based on type (public=blue, restricted=yellow, private=red)');
-    createSettingsCheckbox($highlighterTab, 'WMEPH-ShowFilterHighlight', 'Highlight places without Customer Parking service');
-    if (USER.isDevUser || USER.isBetaUser || USER.rank >= 3) {
-      // createSettingsCheckbox($highlighterTab 'WMEPH-UnlockedRPPs','Highlight unlocked residential place points');
-    }
-
-    // Scanner settings
-    // $highlighterTab.append('<hr align="center" width="90%">');
-    // $highlighterTab.append('<p>Scanner Settings (coming !soon)</p>');
-    // createSettingsCheckbox($highlighterTab, 'WMEPH-PlaceScanner','Placeholder, under development!');
-
-    // Whitelisting settings
-    const phWLContentHtml = $(
-      '<div id="PlaceHarmonizerWLTools">Whitelist string: <input onClick="this.select();" type="text" id="WMEPH-WLInput" style="width:100%;padding-left:1px;display:block">' +
-        '<div style="margin-top:3px;">' +
-        '<input class="btn btn-success btn-xs wmeph-fat-btn" id="WMEPH-WLMerge" title="Merge the string into your existing Whitelist" type="button" value="Merge">' +
-        '<input class="btn btn-success btn-xs wmeph-fat-btn" id="WMEPH-WLPull" title="Pull your existing Whitelist for backup or sharing" type="button" value="Pull">' +
-        '<input class="btn btn-success btn-xs wmeph-fat-btn" id="WMEPH-WLShare" title="Share your Whitelist to a public Google sheet" type="button" value="Share your WL">' +
-        '</div>' +
-        '<div style="margin-top:12px;">' +
-        '<input class="btn btn-info btn-xs wmeph-fat-btn" id="WMEPH-WLStats" title="Display WL stats" type="button" value="Stats">' +
-        '<input class="btn btn-danger btn-xs wmeph-fat-btn" id="WMEPH-WLStateFilter" title="Remove all WL items for a state.  Enter the state in the \'Whitelist string\' box." ' +
-        '     type="button" value="Remove data for 1 State">' +
-        '</div>' +
-        '</div>' +
-        '<div id="PlaceHarmonizerWLToolsMsg" style="margin-top:10px;"></div>',
-    );
-    $wlToolsTab.append(phWLContentHtml);
-
-    $moderatorsTab.append(
-      $('<div>', { style: 'margin-bottom: 10px;' }).text(
-        'Moderators are responsible for reviewing chain submissions for their region.' + ' If you have questions or suggestions regarding a chain, please contact any of your regional moderators.',
-      ),
-      $('<table>').append(
-        Object.keys(Pnh.MODERATORS)
-          .sort()
-          .map((region) =>
-            $('<tr>').append(
-              $('<td>', { class: 'wmeph-mods-table-cell title' }).append($('<div>').text(region)),
-              $('<td>', { class: 'wmeph-mods-table-cell' }).append($('<div>').text(Pnh.MODERATORS[region].join(', '))),
-            ),
-          ),
-      ),
-    );
-
     const { tabLabel, tabPane } = await sdk.Sidebar.registerScriptTab();
     tabLabel.innerHTML = `<span title="WME Place Harmonizer">WMEPH${IS_BETA_VERSION ? '-β' : ''}</span>`;
-    tabPane.innerHTML = $container.html();
     tabPane.classList.add('wmeph-pane');
-    // Fix tab content div spacing.
     $(tabPane).parent().css({ width: 'auto', padding: '8px !important' });
+
+    // Create container for panel content
+    const container = createElem('div');
+    tabPane.appendChild(container);
+
+    // Bootstrap Nav Tabs
+    const navTabs = $('<ul>', { class: 'nav nav-tabs wmeph-internal-tabs', role: 'tablist' }).append(
+      $('<li>', { class: 'nav-item' }).append(
+        $('<a>', {
+          class: 'nav-link active',
+          id: 'wmeph-tab-harmonize',
+          'data-toggle': 'tab',
+          href: '#wmeph-panel-harmonize',
+          role: 'tab',
+          'aria-controls': 'wmeph-panel-harmonize',
+          'aria-selected': 'true'
+        }).text('Harmonize')
+      ),
+      $('<li>', { class: 'nav-item' }).append(
+        $('<a>', {
+          class: 'nav-link',
+          id: 'wmeph-tab-hl-scan',
+          'data-toggle': 'tab',
+          href: '#wmeph-panel-hl-scan',
+          role: 'tab',
+          'aria-controls': 'wmeph-panel-hl-scan',
+          'aria-selected': 'false'
+        }).text('HL / Scan')
+      ),
+      $('<li>', { class: 'nav-item' }).append(
+        $('<a>', {
+          class: 'nav-link',
+          id: 'wmeph-tab-wl-tools',
+          'data-toggle': 'tab',
+          href: '#wmeph-panel-wl-tools',
+          role: 'tab',
+          'aria-controls': 'wmeph-panel-wl-tools',
+          'aria-selected': 'false'
+        }).text('WL Tools')
+      ),
+    );
+    container.appendChild(navTabs[0]);
+
+    // Tab Content Panels
+    const tabContentContainer = $('<div>', { class: 'tab-content', style: 'padding: 4px 0; margin-top: 4px' });
+
+    const harmonizerPanel = $('<div>', {
+      class: 'tab-pane fade show active',
+      id: 'wmeph-panel-harmonize',
+      role: 'tabpanel',
+      'aria-labelledby': 'wmeph-tab-harmonize'
+    });
+
+    const hlScanPanel = $('<div>', {
+      class: 'tab-pane fade',
+      id: 'wmeph-panel-hl-scan',
+      role: 'tabpanel',
+      'aria-labelledby': 'wmeph-tab-hl-scan'
+    });
+
+    const wlToolsPanel = $('<div>', {
+      class: 'tab-pane fade',
+      id: 'wmeph-panel-wl-tools',
+      role: 'tabpanel',
+      'aria-labelledby': 'wmeph-tab-wl-tools'
+    });
+
+    tabContentContainer.append(harmonizerPanel, hlScanPanel, wlToolsPanel);
+    container.appendChild(tabContentContainer[0]);
+
+    // Store panel references for populating content
+    const tabPanels = {
+      harmonizer: harmonizerPanel[0],
+      highlighter: hlScanPanel[0],
+      wltools: wlToolsPanel[0]
+    };
+
+    // Harmonizer tab content - General Settings
+    const generalSettings = createCollapsibleSection('General Settings', 'fa-cogs', true);
+    createSettingsCheckbox(generalSettings.body, 'WMEPH-WebSearchNewTab', 'Open URL & Search Results in new tab instead of new window');
+    createSettingsCheckbox(generalSettings.body, 'WMEPH-EnableIAZoom', 'Enable zoom & center for places with no address');
+    createSettingsCheckbox(generalSettings.body, 'WMEPH-HidePlacesWiki', 'Hide "Places Wiki" button in results banner');
+    createSettingsCheckbox(generalSettings.body, 'WMEPH-HideServicesButtons', 'Hide services buttons in results banner');
+    createSettingsCheckbox(generalSettings.body, 'WMEPH-HidePURWebSearch', 'Hide "Web Search" button on PUR popups');
+    createSettingsCheckbox(generalSettings.body, 'WMEPH-ExcludePLADupes', 'Exclude parking lots when searching for duplicate places');
+    createSettingsCheckbox(generalSettings.body, 'WMEPH-ShowPLAExitWhileClosed', 'Always ask if cars can exit parking lots');
+
+    // Advanced settings (dev/beta only) - added to General Settings
+    if (USER.isDevUser || USER.isBetaUser || USER.rank >= 2) {
+      createSettingsCheckbox(generalSettings.body, 'WMEPH-DisablePLAExtProviderCheck', 'Disable check for "Google place link" on Parking Lot Areas');
+      createSettingsCheckbox(generalSettings.body, 'WMEPH-AddAddresses', 'Add detected address fields to places with no address');
+      createSettingsCheckbox(generalSettings.body, 'WMEPH-EnableCloneMode', 'Enable place cloning tools');
+      createSettingsCheckbox(generalSettings.body, 'WMEPH-AutoLockRPPs', 'Lock residential place points to region default');
+    }
+    tabPanels.harmonizer.appendChild(generalSettings.section);
+
+    // Keyboard shortcut section
+    const kbSettings = createCollapsibleSection('Keyboard Shortcut', 'fa-key', true);
+    const kbWarnDiv = createElem('div', { id: 'PlaceHarmonizerKBWarn' });
+    const kbInput = createElem('input', {
+      type: 'text',
+      id: 'WMEPH-KeyboardShortcut',
+      maxlength: '1',
+      class: 'wmeph-input',
+      style: 'width: 60px;',
+    });
+    const kbCurrentDiv = createElem('div', { id: 'PlaceHarmonizerKBCurrent' });
+    kbSettings.body.appendChild(kbWarnDiv);
+    kbSettings.body.appendChild(makeRow('Shortcut Letter (a-Z):', kbInput));
+    createSettingsCheckbox(kbSettings.body, 'WMEPH-KBSModifierKey', 'Use Ctrl instead of Alt');
+    kbSettings.body.appendChild(kbCurrentDiv);
+    tabPanels.harmonizer.appendChild(kbSettings.section);
+
+    // Dev settings (dev only)
+    if (USER.isDevUser) {
+      const devSettings = createCollapsibleSection('Dev Settings', 'fa-flask', false);
+      createSettingsCheckbox(devSettings.body, 'WMEPH-RegionOverride', 'Disable Region Specificity');
+      const reloadBtnGroup = createElem('div', { class: 'wmeph-button-group' });
+      const reloadBtn = createElem('button', {
+        id: 'WMEPH-ReloadDataBtn',
+        class: 'btn-primary-modern',
+        textContent: 'Refresh Data',
+        title: 'Refresh Data',
+      });
+      reloadBtnGroup.appendChild(reloadBtn);
+      devSettings.body.appendChild(reloadBtnGroup);
+      tabPanels.harmonizer.appendChild(devSettings.section);
+    }
+
+    // Regional Moderators section
+    const moderatorsSection = createCollapsibleSection('Regional Moderators', 'fa-users', false);
+    const modDescription = createElem('p', {
+      textContent: 'Moderators are responsible for reviewing chain submissions for their region. If you have questions or suggestions regarding a chain, please contact any of your regional moderators.',
+      style: 'margin: 0 0 12px 0; font-size: 12px; line-height: 1.4;',
+    });
+    moderatorsSection.body.appendChild(modDescription);
+
+    const modsTable = createElem('table', { class: 'wmeph-mods-table' });
+    Object.keys(Pnh.MODERATORS)
+      .sort()
+      .forEach((region) => {
+        const row = createElem('tr');
+        const regionCell = createElem('td', { class: 'wmeph-mods-table-cell title', textContent: region });
+        const modsCell = createElem('td', { class: 'wmeph-mods-table-cell', textContent: Pnh.MODERATORS[region].join(', ') });
+        row.appendChild(regionCell);
+        row.appendChild(modsCell);
+        modsTable.appendChild(row);
+      });
+    moderatorsSection.body.appendChild(modsTable);
+    tabPanels.harmonizer.appendChild(moderatorsSection.section);
+
+    // Resources section
+    const resourcesSection = createCollapsibleSection('Resources', 'fa-link', true);
+    const wikiLink = createElem('a', { href: URLS.placesWiki, target: '_blank', textContent: 'Open the WME Places Wiki page' });
+    const forumLink = createElem('a', { href: URLS.forum, target: '_blank', textContent: 'Submit script feedback & suggestions' });
+    resourcesSection.body.appendChild(makeRow('', wikiLink));
+    resourcesSection.body.appendChild(makeRow('', forumLink));
+    tabPanels.harmonizer.appendChild(resourcesSection.section);
+
+    // Highlighter tab content - Display Options
+    const displayOptions = createCollapsibleSection('Display Options', 'fa-palette', true);
+    createSettingsCheckbox(displayOptions.body, 'WMEPH-ColorHighlighting', 'Enable color highlighting of map to indicate places needing work');
+    createSettingsCheckbox(displayOptions.body, 'WMEPH-HideGreenPlaces', 'Disable highlighting for places NOT needing work (green places)');
+    createSettingsCheckbox(displayOptions.body, 'WMEPH-DisableHoursHL', 'Disable highlighting for missing hours');
+    createSettingsCheckbox(displayOptions.body, 'WMEPH-DisableRankHL', 'Disable highlighting for places locked above your rank');
+    createSettingsCheckbox(displayOptions.body, 'WMEPH-DisableWLHL', 'Disable Whitelist highlighting (shows all missing info regardless of WL)');
+    createSettingsCheckbox(displayOptions.body, 'WMEPH-PLATypeFill', 'Fill parking lots based on type (public=blue, restricted=yellow, private=red)');
+    createSettingsCheckbox(displayOptions.body, 'WMEPH-ShowFilterHighlight', 'Highlight places without Customer Parking service');
+    tabPanels.highlighter.appendChild(displayOptions.section);
+
+    // WL Tools tab content - Whitelist Tools
+    const wlToolsSection = createCollapsibleSection('Whitelist Tools', 'fa-database', true);
+    const wlInput = createElem('input', {
+      type: 'text',
+      id: 'WMEPH-WLInput',
+      class: 'wmeph-input',
+      style: 'width: 100%; margin-bottom: 8px;',
+      placeholder: 'Whitelist string',
+    });
+    wlToolsSection.body.appendChild(wlInput);
+
+    const wlBtnRow1 = createElem('div', { class: 'wmeph-button-group', style: 'margin-bottom: 8px;' });
+    const wlMergeBtn = createElem('button', { id: 'WMEPH-WLMerge', class: 'btn-primary-modern', textContent: 'Merge', title: 'Merge the string into your existing Whitelist' });
+    const wlPullBtn = createElem('button', { id: 'WMEPH-WLPull', class: 'btn-primary-modern', textContent: 'Pull', title: 'Pull your existing Whitelist for backup or sharing' });
+    const wlShareBtn = createElem('button', { id: 'WMEPH-WLShare', class: 'btn-primary-modern', textContent: 'Share WL', title: 'Share your Whitelist to a public Google sheet' });
+    wlBtnRow1.appendChild(wlMergeBtn);
+    wlBtnRow1.appendChild(wlPullBtn);
+    wlBtnRow1.appendChild(wlShareBtn);
+    wlToolsSection.body.appendChild(wlBtnRow1);
+
+    const wlBtnRow2 = createElem('div', { class: 'wmeph-button-group' });
+    const wlStatsBtn = createElem('button', { id: 'WMEPH-WLStats', class: 'btn-primary-modern', textContent: 'Stats', title: 'Display WL stats' });
+    const wlFilterBtn = createElem('button', { id: 'WMEPH-WLStateFilter', class: 'btn-primary-modern', textContent: 'Remove 1 State', title: 'Remove all WL items for a state. Enter the state in the input box.' });
+    wlBtnRow2.appendChild(wlStatsBtn);
+    wlBtnRow2.appendChild(wlFilterBtn);
+    wlToolsSection.body.appendChild(wlBtnRow2);
+
+    const wlMsgDiv = createElem('div', { id: 'PlaceHarmonizerWLToolsMsg', style: 'margin-top: 8px;' });
+    wlToolsSection.body.appendChild(wlMsgDiv);
+    const wlToolsDiv = createElem('div', { id: 'PlaceHarmonizerWLTools' });
+    wlToolsDiv.appendChild(wlToolsSection.section);
+    tabPanels.wltools.appendChild(wlToolsDiv);
+
+    // Version footer
+    const versionDiv = createElem('div', {
+      textContent: `WMEPH ${BETA_VERSION_STR} v${SCRIPT_VERSION}`,
+      style: 'color: #999; font-size: 12px; margin-top: 12px; text-align: center;',
+    });
+    container.appendChild(versionDiv);
+
     initWmephTab();
   }
 
@@ -11874,9 +13512,9 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
       WMEPH_CPcity: 'fa-map-marker', // City
       WMEPH_CPurl: 'fa-link', // URL
       WMEPH_CPph: 'fa-phone', // Phone
-      WMEPH_CPdesc: 'fa-file-text', // Description
+      WMEPH_CPdesc: 'fa-file', // Description
       WMEPH_CPserv: 'fa-cog', // Services
-      WMEPH_CPhrs: 'fa-clock-o', // Hours
+      WMEPH_CPhrs: 'fa-clock', // Hours
     };
 
     const icon = iconMap[settingID];
@@ -11885,28 +13523,17 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
     const $button = $('<button>', {
       id: settingID,
       type: 'button',
-      class: 'wmeph-icon-toggle',
+      class: `wmeph-icon-toggle ${isChecked ? 'checked' : ''}`,
       title: textDescription,
-      style: `
-                background: none;
-                border: none;
-                padding: 4px 6px;
-                cursor: pointer;
-                font-size: 16px;
-                color: ${isChecked ? '#0075e3' : '#999'};
-                transition: all 0.2s ease;
-                opacity: ${isChecked ? '1' : '0.5'};
-            `,
+      'aria-label': textDescription,
+      'aria-pressed': isChecked,
     })
-      .html(icon ? `<i class="fa ${icon}"></i>` : textDescription)
+      .html(icon ? `<i class="fa ${icon}" aria-hidden="true"></i>` : textDescription)
       .click(function () {
         const checked = getWMEPHSetting(settingID) === '1';
         const newState = checked ? '0' : '1';
         setWMEPHSetting(settingID, newState);
-        $(this).css({
-          color: newState === '1' ? '#0075e3' : '#999',
-          opacity: newState === '1' ? '1' : '0.5',
-        });
+        $(this).toggleClass('checked', newState === '1').attr('aria-pressed', newState === '1');
       });
 
     return $button;
@@ -12664,7 +14291,7 @@ id="WMEPH-zipAltNameAdd"autocomplete="off" style="font-size:0.85em;width:65px;pa
     sdk.Events.on({
       eventName: 'wme-selection-changed',
       eventHandler: () => {
-        logDev('selectionchanged');
+        //logDev('selectionchanged');
         errorHandler(updateWmephPanel, true);
       },
     });
