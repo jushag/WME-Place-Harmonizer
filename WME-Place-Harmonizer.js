@@ -648,7 +648,6 @@
   let _stateDataTemp;
   let _areaCodeList = '800,822,833,844,855,866,877,888'; //  include toll free non-geographic area codes
 
-  let OpeningHour;
   const DEFAULT_HOURS_TEXT = 'Paste hours here';
 
   // GOOGLE LINK STUFF
@@ -4547,7 +4546,7 @@
       action() {
         const categories = insertAtIndex(this.args.venue.categories, 'REST_AREAS', 0);
         // make it 24/7
-        const openingHours = [new OpeningHour({ days: [1, 2, 3, 4, 5, 6, 0], fromHour: '00:00', toHour: '00:00' })];
+        const openingHours = { days: [1, 2, 3, 4, 5, 6, 0], fromHour: '00:00', toHour: '00:00' };
         addUpdateAction(this.args.venue, { categories, openingHours }, null, true);
       }
     },
@@ -9454,7 +9453,7 @@
           checked = toggle ? !_servicesBanner.add247.checked : checked;
 
           if (checked) {
-            addUpdateAction(venue, { openingHours: [new OpeningHour({ days: [1, 2, 3, 4, 5, 6, 0], fromHour: '00:00', toHour: '00:00' })] }, actions);
+            addUpdateAction(venue, { openingHours: { days: [1, 2, 3, 4, 5, 6, 0], fromHour: '00:00', toHour: '00:00' } }, actions);
           } else {
             addUpdateAction(venue, { openingHours: [] }, actions);
           }
@@ -9781,11 +9780,11 @@
           const newHoursEntries = [];
           args.openingHours.forEach((hoursEntry) => {
             const isInvalid = args.almostAllDayHoursEntries.includes(hoursEntry);
-            const newHoursEntry = new OpeningHour({
+            const newHoursEntry = {
               days: hoursEntry.days.slice(),
               fromHour: isInvalid ? '00:00' : hoursEntry.fromHour,
               toHour: isInvalid ? '00:00' : hoursEntry.toHour,
-            });
+            };
             newHoursEntries.push(newHoursEntry);
           });
           args.openingHours = newHoursEntries;
@@ -10146,7 +10145,7 @@
                 if (tempHours[ohix].days.length === 2 && tempHours[ohix].days[0] === 1 && tempHours[ohix].days[1] === 0) {
                   // separate hours
                   logDev('Correcting M-S entry...');
-                  tempHours.push(new OpeningHour({ days: [0], fromHour: tempHours[ohix].fromHour, toHour: tempHours[ohix].toHour }));
+                  tempHours.push({ days: [0], fromHour: tempHours[ohix].fromHour, toHour: tempHours[ohix].toHour });
                   tempHours[ohix].days = [1];
                   args.openingHours = tempHours;
                   addUpdateAction(venue, { openingHours: tempHours }, actions);
@@ -14044,8 +14043,6 @@
     // Add CSS stuff here
     const css = ['.wmeph-mods-table-cell { border: solid 1px #bdbdbd; padding-left: 3px; padding-right: 3px; }', '.wmeph-mods-table-cell.title { font-weight: bold; }'].join('\n');
     $('head').append(`<style type="text/css">${css}</style>`);
-
-    OpeningHour = require('Waze/Model/Objects/OpeningHour');
 
     // Append a form div for submitting to the forum, if it doesn't exist yet:
     const tempDiv = document.createElement('div');
